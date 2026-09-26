@@ -21,6 +21,9 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
 - **Meespelen**: opname (mp3) of YouTube-link per nummer, met A-B herhalen, ±10 s en tempo.
   YouTube via de officiële speler (youtube-nocookie), alleen met internet.
 - **Back-up** als .zip (delen naar Drive/OneDrive) en terugzetten.
+- **SharePoint**: link van een gedeelde map plakken, inloggen met Microsoft, door submappen
+  bladeren, zoeken, nummers aanvinken. Een map *volgen* = nieuwe/gewijzigde nummers komen er
+  bij het openen vanzelf bij. Krabbels en gegevens blijven bij een nieuwe versie behouden.
 
 ## Structuur
 
@@ -47,3 +50,25 @@ en `js/update.js` vervangen door datum + commit. De app controleert bij openen,
 bij terugkeren en elk half uur, en toont dan *Nieuwe versie beschikbaar →
 Bijwerken*. Terwijl de lezer open is wacht de melding tot je hem sluit.
 Handmatig kan via Instellingen → *Controleren op updates*.
+
+## SharePoint instellen (eenmalig)
+
+De app gebruikt de officiële Microsoft Graph-koppeling. Daarvoor is één
+app-registratie nodig:
+
+1. Ga naar <https://entra.microsoft.com> → **Applicaties → App-registraties → Nieuwe registratie**.
+2. Naam: `Muzivotheek`.
+3. Ondersteunde accounttypen: **Accounts in elke organisatiedirectory en persoonlijke
+   Microsoft-accounts** (dan kunnen ook leden van andere organisaties inloggen).
+4. Omleidings-URI: platform **Single-page application (SPA)**, adres
+   `https://imetech-engineering.github.io/muzivotheek-pwa/` → **Registreren**.
+5. Bij **Verificatie** een tweede SPA-omleidings-URI toevoegen:
+   `https://imetech-engineering.github.io/muzivotheek-pwa/auth.html`.
+6. Bij **API-machtigingen** → **Machtiging toevoegen** → Microsoft Graph → **Gedelegeerde
+   machtigingen** → `Files.Read.All` (User.Read staat er al).
+7. Kopieer de **Toepassings-id (client)** van de overzichtspagina naar `pwa/config.js`.
+
+Zolang `config.js` geen client-id heeft, is SharePoint in de app verborgen.
+Leden hebben een Microsoft-account nodig met toegang tot de gedeelde map. Blokkeert
+een organisatie toestemming door gebruikers, dan moet een beheerder daar eenmalig
+toestemming geven.

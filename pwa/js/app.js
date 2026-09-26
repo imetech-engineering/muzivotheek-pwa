@@ -13,6 +13,8 @@ import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, f
 import { icon } from "./icons.js";
 import { parseYouTube, searchUrl } from "./youtube.js";
 import { canLinkFolder, canPickFolderOnce, linkFolder, unlinkFolder, folderSources, syncFolder, syncAllFolders, regrantAndSync, pickFolderOnce } from "./folders.js";
+import { openSharePoint, resumeAfterRedirect, spSettings } from "./sp_ui.js";
+import { spConfigured, syncAllSharePoint } from "./sharepoint.js";
 import { initUpdates, check as checkUpdate, applyUpdate, BUILD } from "./update.js";
 
 const VERSION = "1.0.0";
@@ -158,8 +160,8 @@ async function renderSongs() {
           h("h2", {}, "Nog geen bladmuziek"),
           h("p", {}, "Voeg PDF's toe vanaf je apparaat."),
           h("button", { type: "button", class: "btn primary big", onclick: pickFiles, html: icon("plus") + "<span>PDF's toevoegen</span>" }),
-          canLinkFolder() || canPickFolderOnce()
-            ? h("div", {}, h("button", { type: "button", class: "btn big second", onclick: addMenu, html: icon("folder") + "<span>Of een hele map</span>" }))
+          canLinkFolder() || canPickFolderOnce() || spConfigured()
+            ? h("div", {}, h("button", { type: "button", class: "btn big second", onclick: addMenu, html: icon("folder") + `<span>${spConfigured() ? "Of uit SharePoint / een map" : "Of een hele map"}</span>` }))
             : null
         )
       );
@@ -406,11 +408,13 @@ document.addEventListener("edit-song", (e) => editSong(e.detail.id, e.detail.onS
 // Plus-knop: kiezen hoe je nummers toevoegt.
 async function addMenu() {
   const items = [{ label: "PDF's kiezen", value: "files", icon: icon("upload") }];
+  if (spConfigured()) items.push({ label: "Uit SharePoint", value: "sp", icon: icon("link") });
   if (canLinkFolder()) items.push({ label: "Map koppelen (blijft bijgewerkt)", value: "link", icon: icon("folder") });
   else if (canPickFolderOnce()) items.push({ label: "Hele map toevoegen", value: "once", icon: icon("folder") });
   if (items.length === 1) return pickFiles();
   const v = await menu("Nummers toevoegen", items);
   if (v === "files") pickFiles();
+  if (v === "sp") openSharePoint();
   if (v === "once") importFiles(await pickFolderOnce());
   if (v === "link") {
     try {
@@ -957,6 +961,7 @@ async function renderSettings() {
 
   const est = await storageEstimate();
   const sources = await folderSources();
+  const spGroup = await spSettings(renderSettings, (title, ...rows) => group(title, ...rows));
   const songs = await allSongs();
   const lists = await allSetlists();
   const persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted().catch(() => false) : false;
@@ -1004,6 +1009,7 @@ async function renderSettings() {
       toggle("metroAccent", "Eerste tel harder"),
       select("tunerRef", "Stemtoon A", [[438, "438 Hz"], [440, "440 Hz"], [441, "441 Hz"], [442, "442 Hz"], [443, "443 Hz"]], Number)
     ),
+    spGroup,
     sources.length || canLinkFolder()
       ? group(
           "Gekoppelde mappen",
@@ -1200,6 +1206,16 @@ function init() {
   setTab("songs");
   importShared();
   allSongs().then((s) => s.length && persistStorage());
+  // Terug van inloggen bij Microsoft? Dan daar verder. Daarna SharePoint-mappen stil bijwerken.
+  resumeAfterRedirect()
+    .then(() => syncAllSharePoint())
+    .then((r) => {
+      if (r.added || r.updated) {
+        toast("SharePoint: " + [r.added ? `${r.added} nieuw` : "", r.updated ? `${r.updated} bijgewerkt` : ""].filter(Boolean).join(", "), 3000);
+        document.dispatchEvent(new CustomEvent("library"));
+      }
+    })
+    .catch(() => {});
   // Gekoppelde mappen stil bijwerken bij het starten.
   syncAllFolders().then((r) => {
     state.needPermission = r.needPermission;

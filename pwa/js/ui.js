@@ -39,10 +39,10 @@ export function toast(msg, ms = 2200) {
 }
 
 // Onderlaag-dialoog. content is een element; buttons [{label, value, kind}].
-export function dialog({ title, content, buttons = [{ label: "OK", value: true, kind: "primary" }], sheet = false }) {
+export function dialog({ title, content, buttons = [{ label: "OK", value: true, kind: "primary" }], sheet = false, cls = "" }) {
   return new Promise((resolve) => {
     const back = h("div", { class: "dlg-back" + (sheet ? " sheet" : "") });
-    const box = h("div", { class: "dlg", role: "dialog", "aria-modal": "true" });
+    const box = h("div", { class: "dlg" + (cls ? " " + cls : ""), role: "dialog", "aria-modal": "true" });
     if (title) box.append(h("h2", { class: "dlg-title" }, title));
     if (content) box.append(h("div", { class: "dlg-body" }, content));
     const row = h("div", { class: "dlg-btns" });

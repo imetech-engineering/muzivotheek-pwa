@@ -1820,3 +1820,64 @@ body.viewing .update-bar {
   width: 18px;
   height: 18px;
 }
+
+/* ---------- SharePoint ---------- */
+.dlg.wide {
+  max-width: 640px;
+}
+.sp-browser {
+  display: grid;
+  gap: 8px;
+}
+.sp-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.sp-crumb {
+  border: 0;
+  background: none;
+  padding: 4px 6px;
+  border-radius: 8px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.sp-crumb.cur {
+  color: var(--text);
+}
+.sp-tools {
+  display: flex;
+  gap: 6px;
+}
+.sp-list {
+  max-height: 50vh;
+  max-height: 50dvh;
+}
+.sp-folder .sp-ic {
+  width: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  flex: none;
+}
+.sp-go {
+  margin-left: auto;
+  color: var(--text-3);
+  display: flex;
+}
+.pick-t {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pick-t small,
+.sp-path {
+  color: var(--text-3);
+}
+.sp-follow {
+  font-weight: 500;
+  font-size: 14px;
+}
+.btn.small.primary {
+  color: #fff;
+}
