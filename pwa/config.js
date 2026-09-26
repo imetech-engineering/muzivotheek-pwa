@@ -2,7 +2,7 @@
 // De client-id is geen geheim en mag in de openbare repo staan.
 // Hoe je hem krijgt: zie README, kopje "SharePoint instellen".
 window.MUZI_CONFIG = {
-  clientId: "VUL_HIER_DE_CLIENT_ID_IN",
+  clientId: "2fbb60d6-bedb-41d5-aac8-891d096219ca",
   // "common" = inloggen met werk-/schoolaccounts van elke organisatie én
   // persoonlijke Microsoft-accounts.
   authority: "https://login.microsoftonline.com/common",

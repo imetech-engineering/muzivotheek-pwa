@@ -64,9 +64,23 @@ app-registratie nodig:
    `https://imetech-engineering.github.io/muzivotheek-pwa/` → **Registreren**.
 5. Bij **Verificatie** een tweede SPA-omleidings-URI toevoegen:
    `https://imetech-engineering.github.io/muzivotheek-pwa/auth.html`.
-6. Bij **API-machtigingen** → **Machtiging toevoegen** → Microsoft Graph → **Gedelegeerde
-   machtigingen** → `Files.Read.All` (User.Read staat er al).
+6. (Optioneel) Bij **API-machtigingen** `Files.Read.All` toevoegen. Niet nodig: de app vraagt
+   dit leesrecht zelf aan bij het inloggen.
 7. Kopieer de **Toepassings-id (client)** van de overzichtspagina naar `pwa/config.js`.
+
+De app vraagt alleen **leesrechten**: er wordt nooit iets naar SharePoint geschreven. Krabbels,
+bladwijzers en lijsten blijven op het apparaat.
+
+**Toestemming bij andere organisaties.** Microsoft laat gebruikers van een *andere* organisatie
+geen toestemming geven aan een nieuwe multi-tenant app van een niet-geverifieerde uitgever.
+Staat de SharePoint in de Microsoft-omgeving van de vereniging, dan moet hun beheerder eenmalig
+toestemming geven via
+`https://login.microsoftonline.com/<tenant-id-vereniging>/adminconsent?client_id=<client-id>`.
+Alternatief: dezelfde app-registratie in hún omgeving aanmaken en die client-id gebruiken.
+
+**Nieuwe deellinks.** Wordt er een nieuwe link gedeeld, plak die dan bij *+ → Uit SharePoint* of
+deel hem vanuit WhatsApp naar Muzivotheek; de app vraagt of het de nieuwe link van een bestaande
+map is. Werkt een oude link niet meer, dan meldt de bibliotheek dat. Nummers en krabbels blijven.
 
 Zolang `config.js` geen client-id heeft, is SharePoint in de app verborgen.
 Leden hebben een Microsoft-account nodig met toegang tot de gedeelde map. Blokkeert

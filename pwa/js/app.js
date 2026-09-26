@@ -13,7 +13,7 @@ import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, f
 import { icon } from "./icons.js";
 import { parseYouTube, searchUrl } from "./youtube.js";
 import { canLinkFolder, canPickFolderOnce, linkFolder, unlinkFolder, folderSources, syncFolder, syncAllFolders, regrantAndSync, pickFolderOnce } from "./folders.js";
-import { openSharePoint, resumeAfterRedirect, spSettings } from "./sp_ui.js";
+import { openSharePoint, openSharePointWithLink, fixBrokenLinks, resumeAfterRedirect, spSettings } from "./sp_ui.js";
 import { spConfigured, syncAllSharePoint } from "./sharepoint.js";
 import { initUpdates, check as checkUpdate, applyUpdate, BUILD } from "./update.js";
 
@@ -26,6 +26,7 @@ const state = {
   filter: "", // "" | "★" | map-naam
   openList: null, // id van geopende afspeellijst
   needPermission: [], // gekoppelde mappen die opnieuw toestemming nodig hebben
+  spBroken: [], // SharePoint-mappen waarvan de link niet meer werkt
 };
 
 // ---------- tabs ----------
@@ -138,7 +139,20 @@ async function renderSongs() {
         html: icon("folder") + `<span>Tik om ${state.needPermission.length > 1 ? "je gekoppelde mappen" : `map "${state.needPermission[0].name}"`} bij te werken</span>`,
       })
     : null;
-  fill(tab, folderBar, h("div", { class: "search-row" }, h("span", { class: "search-ic", html: icon("search") }), search), tools, fl.length || all.some((s) => s.favorite) ? chips : null, listEl);
+  const spBar = state.spBroken.length
+    ? h("button", {
+        type: "button",
+        class: "sync-bar",
+        onclick: async () => {
+          const b = state.spBroken;
+          state.spBroken = [];
+          await fixBrokenLinks(b);
+          renderSongs();
+        },
+        html: icon("link") + `<span>SharePoint-link van "${state.spBroken[0].name}" werkt niet meer. Tik om de nieuwe link te plakken.</span>`,
+      })
+    : null;
+  fill(tab, spBar, folderBar, h("div", { class: "search-row" }, h("span", { class: "search-ic", html: icon("search") }), search), tools, fl.length || all.some((s) => s.favorite) ? chips : null, listEl);
 
   function chip(label, val) {
     return h("button", { type: "button", class: "chip" + (state.filter === val ? " on" : ""), onclick: () => { state.filter = val; renderSongs(); } }, label);
@@ -1205,11 +1219,19 @@ function init() {
   document.addEventListener("setlists", () => state.tab === "lists" && !viewerOpen() && renderLists());
   setTab("songs");
   importShared();
+  // Link gedeeld vanuit WhatsApp/mail (Delen → Muzivotheek).
+  const sharedLink = new URLSearchParams(location.search).get("link");
+  if (sharedLink) {
+    history.replaceState(null, "", location.pathname);
+    setTimeout(() => openSharePointWithLink(sharedLink), 300);
+  }
   allSongs().then((s) => s.length && persistStorage());
   // Terug van inloggen bij Microsoft? Dan daar verder. Daarna SharePoint-mappen stil bijwerken.
   resumeAfterRedirect()
     .then(() => syncAllSharePoint())
     .then((r) => {
+      state.spBroken = r.broken || [];
+      if (state.spBroken.length && state.tab === "songs" && !viewerOpen()) renderSongs();
       if (r.added || r.updated) {
         toast("SharePoint: " + [r.added ? `${r.added} nieuw` : "", r.updated ? `${r.updated} bijgewerkt` : ""].filter(Boolean).join(", "), 3000);
         document.dispatchEvent(new CustomEvent("library"));

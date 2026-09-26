@@ -2,7 +2,7 @@
 
 import {
   spConfigured, account, login, logout, token, looksLikeLink, addSource, spSources, saveSource, removeSource,
-  listChildren, listAll, isPdf, isImported, importItems, syncSource, msal,
+  listChildren, listAll, isPdf, isImported, importItems, syncSource, msal, relinkSource,
 } from "./sharepoint.js";
 import { $, h, fill, toast, dialog, confirmDlg, promptDlg, menu } from "./ui.js";
 import { icon } from "./icons.js";
@@ -40,28 +40,48 @@ export async function openSharePoint() {
   let src = null;
   if (sources.length) {
     const v = await menu("SharePoint", [
-      ...sources.map((s) => ({ label: s.name, value: s.id, icon: icon("folder") })),
-      { label: "Andere map (link plakken)…", value: "__new", icon: icon("link") },
+      ...sources.map((s) => ({ label: s.broken ? `${s.name} (link werkt niet meer)` : s.name, value: s.id, icon: icon("folder"), danger: !!s.broken })),
+      { label: "Nieuwe link plakken…", value: "__new", icon: icon("link") },
     ]);
     if (!v) return;
     src = sources.find((s) => s.id === v) || null;
+    if (src && src.broken) src = await askLink("", src);
+    else if (!src) src = await askLink();
+    if (src) browse(src);
+    return;
   }
   if (!src) src = await askLink();
   if (src) browse(src);
 }
 
-async function askLink(prefill = "") {
-  const link = await promptDlg("Plak de SharePoint-link van de map", prefill, { placeholder: "https://…sharepoint.com/…", okLabel: "Verbinden" });
+// Link vragen. replace = bestaande map waarvoor dit de nieuwe link is.
+async function askLink(prefill = "", replace = null) {
+  const title = replace ? `Nieuwe link voor "${replace.name}"` : "Plak de SharePoint-link van de map";
+  let link = await promptDlg(title, prefill, { placeholder: "https://…sharepoint.com/…", okLabel: "Verbinden" });
   if (!link) return null;
-  if (!looksLikeLink(link)) {
+  link = extractLink(link);
+  if (!link) {
     toast("Dat lijkt geen SharePoint- of OneDrive-link", 3000);
     return null;
+  }
+  // Nieuwe link terwijl er al mappen zijn? Vaak is het de nieuwe link van een bestaande map.
+  if (!replace) {
+    const sources = await spSources();
+    if (sources.length) {
+      const v = await menu("Wat is deze link?", [
+        ...sources.map((s) => ({ label: `Nieuwe link voor "${s.name}"`, value: s.id, icon: icon("repeat") })),
+        { label: "Een extra map", value: "__extra", icon: icon("plus") },
+      ]);
+      if (!v) return null;
+      replace = sources.find((s) => s.id === v) || null;
+    }
   }
   // Als inloggen via doorverwijzen gaat, na terugkomst verder met deze link.
   localStorage.setItem(PENDING, link);
   try {
     progress("Verbinden met SharePoint…");
-    const src = await addSource(link);
+    const src = replace ? await relinkSource(replace, link) : await addSource(link);
+    if (replace) toast("Link bijgewerkt", 2000);
     localStorage.removeItem(PENDING);
     return src;
   } catch (e) {
@@ -71,6 +91,31 @@ async function askLink(prefill = "") {
   } finally {
     done();
   }
+}
+
+// Haal de eerste SharePoint/OneDrive-link uit geplakte tekst (bv. een heel WhatsApp-bericht).
+function extractLink(text) {
+  const urls = String(text).match(/https?:\/\/[^\s<>"']+/g) || [];
+  return urls.find((u) => looksLikeLink(u)) || null;
+}
+
+// Gedeeld vanuit WhatsApp/mail: link staat al klaar, één tik op Verbinden.
+export async function openSharePointWithLink(link) {
+  if (!spConfigured()) return notConfigured();
+  const src = await askLink(link);
+  if (src) browse(src);
+}
+
+// Knop in de bibliotheek als een link niet meer werkt.
+export async function fixBrokenLinks(broken) {
+  let src = broken[0];
+  if (broken.length > 1) {
+    const id = await menu("Welke map?", broken.map((s) => ({ label: s.name, value: s.id, icon: icon("folder") })));
+    src = broken.find((s) => s.id === id);
+  }
+  if (!src) return;
+  const fixed = await askLink("", src);
+  if (fixed) browse(fixed);
 }
 
 // Na terugkomst van een inlog-doorverwijzing: afmaken waar we gebleven waren.
@@ -132,7 +177,16 @@ async function browse(src) {
       items = await listChildren(src, stack[stack.length - 1].id, tok);
       items.sort((a, b) => (!!b.folder - !!a.folder) || a.name.localeCompare(b.name, "nl", { numeric: true }));
     } catch (e) {
-      fill(list, h("p", { class: "muted center pad" }, e.message));
+      const dead = e.status === 403 || e.status === 404;
+      if (dead) {
+        src.broken = true;
+        saveSource(src);
+      }
+      fill(
+        list,
+        h("p", { class: "muted center pad" }, dead ? "Deze link werkt niet meer (verlopen of vervangen)." : e.message),
+        dead ? h("button", { type: "button", class: "btn primary block", onclick: async () => { dialog.close && dialog.close(false); const f = await askLink("", src); if (f) browse(f); } }, "Nieuwe link plakken") : null
+      );
       return;
     }
     draw();
@@ -267,12 +321,13 @@ export async function spSettings(rerender, group) {
           "div",
           {},
           h("div", { class: "set-l" }, src.name),
-          h("div", { class: "set-s" }, (src.follow ? "Volgen · " : "") + (src.lastSync ? "Bijgewerkt " + new Date(src.lastSync).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Nog niet bijgewerkt"))
+          h("div", { class: "set-s" + (src.broken ? " warn" : "") }, (src.broken ? "Link werkt niet meer · " : "") + (src.follow ? "Volgen · " : "") + (src.lastSync ? "Bijgewerkt " + new Date(src.lastSync).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Nog niet bijgewerkt"))
         ),
         h(
           "div",
           { class: "row-btns" },
           h("button", { type: "button", class: "btn small", onclick: () => browse(src) }, "Kiezen"),
+          h("button", { type: "button", class: "btn small" + (src.broken ? " primary" : ""), onclick: async () => { const f = await askLink("", src); if (f) rerender(); } }, "Nieuwe link"),
           h("button", {
             type: "button",
             class: "btn small",

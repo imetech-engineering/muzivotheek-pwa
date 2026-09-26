@@ -1881,3 +1881,7 @@ body.viewing .update-bar {
 .btn.small.primary {
   color: #fff;
 }
+.set-s.warn {
+  color: var(--danger);
+  font-weight: 600;
+}

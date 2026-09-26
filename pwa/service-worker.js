@@ -78,6 +78,12 @@ self.addEventListener("fetch", (event) => {
             new Response(f, { headers: { "content-type": f.type || "application/pdf", "x-name": encodeURIComponent(f.name) } })
           );
         }
+        // Geen bestand maar een link (bv. SharePoint-link uit WhatsApp)?
+        if (!i) {
+          const text = [form.get("url"), form.get("text"), form.get("title")].filter(Boolean).join(" ");
+          const link = (text.match(/https?:\/\/[^\s<>"']+/) || [])[0];
+          if (link) return Response.redirect("./?link=" + encodeURIComponent(link), 303);
+        }
         return Response.redirect("./?shared=1", 303);
       })()
     );

@@ -230,6 +230,17 @@ export async function addSource(link) {
   return src;
 }
 
+// Nieuwe deellink voor een bestaande map (de oude link is verlopen of vervangen).
+// Nummers, krabbels en "volgen" blijven; zelfde bestanden worden herkend.
+export async function relinkSource(src, link) {
+  const tok = await token(true);
+  const { sid, item } = await resolveLink(link, tok);
+  if (!item.folder) throw new Error("Deze link wijst naar een bestand, niet naar een map. Deel de map zelf.");
+  Object.assign(src, { name: item.name, link: link.trim(), sid, driveId: item.parentReference && item.parentReference.driveId, itemId: item.id, broken: false });
+  await db.put("sources", src.id, src);
+  return src;
+}
+
 export const saveSource = (src) => db.put("sources", src.id, src);
 export const removeSource = (id) => db.del("sources", id);
 
@@ -268,7 +279,19 @@ export async function importItems(src, items, onProgress) {
 export async function syncSource(src, { interactive = false, onProgress } = {}) {
   const tok = await token(interactive);
   if (!tok) return { added: 0, updated: 0, needLogin: true };
-  const all = await listAll(src, src.itemId, tok, [], (p) => onProgress && onProgress("Kijken in " + p));
+  let all;
+  try {
+    all = await listAll(src, src.itemId, tok, [], (p) => onProgress && onProgress("Kijken in " + p));
+  } catch (e) {
+    if (e.status === 403 || e.status === 404) {
+      // Link verlopen of ingetrokken: onthouden, zodat de app om de nieuwe link kan vragen.
+      src.broken = true;
+      await saveSource(src);
+      e.message = `De link van "${src.name}" werkt niet meer. Plak de nieuwe link.`;
+    }
+    throw e;
+  }
+  if (src.broken) src.broken = false;
   const todo = [];
   for (const it of all) {
     const existing = await findBySrc(srcKey(src, it));
@@ -285,9 +308,10 @@ export async function syncAllSharePoint(opts = {}) {
   let added = 0;
   let updated = 0;
   let needLogin = false;
-  if (!spConfigured() || !navigator.onLine) return { added, updated, needLogin };
+  const broken = [];
+  if (!spConfigured() || !navigator.onLine) return { added, updated, needLogin, broken };
   const sources = await spSources();
-  if (!sources.length) return { added, updated, needLogin };
+  if (!sources.length) return { added, updated, needLogin, broken };
   for (const src of sources) {
     try {
       const r = await syncSource(src, opts);
@@ -298,6 +322,7 @@ export async function syncAllSharePoint(opts = {}) {
       console.warn("SharePoint bijwerken mislukt", src.name, e);
       if (e.status === 401) needLogin = true;
     }
+    if (src.broken) broken.push(src);
   }
-  return { added, updated, needLogin };
+  return { added, updated, needLogin, broken };
 }
