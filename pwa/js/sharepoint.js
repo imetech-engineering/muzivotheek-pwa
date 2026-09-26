@@ -35,7 +35,11 @@ async function proxy(kind, params) {
     throw new Error("Geen verbinding met SharePoint (internet?)");
   }
   if (kind === "file" && r.ok) return r;
-  const d = await r.json().catch(() => ({}));
+  const d = await r.json().catch(() => null);
+  if (!d || (r.ok && kind === "list" && !Array.isArray(d.files))) {
+    // Bv. nog de voorbeeldcode ("Hello World") op de tussenservice.
+    throw new Error("De SharePoint-tussenservice is niet goed ingesteld. Vraag de beheerder van de app.");
+  }
   if (!r.ok) {
     const err = new Error(d.error || "SharePoint gaf fout " + r.status);
     err.status = d.expired ? 404 : r.status;

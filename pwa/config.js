@@ -8,5 +8,5 @@ window.MUZI_CONFIG = {
   authority: "https://login.microsoftonline.com/common",
   // Adres van de tussenservice (Cloudflare Worker, zie worker/README.md). Hiermee
   // werken links "Iedereen met de link" zonder account. Leeg = alleen via inloggen.
-  proxyUrl: "",
+  proxyUrl: "https://muzivotheek.ivo-mengerink.workers.dev/",
 };
