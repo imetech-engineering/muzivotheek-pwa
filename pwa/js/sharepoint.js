@@ -1,8 +1,12 @@
-// SharePoint / OneDrive via Microsoft Graph (officiële route).
+// SharePoint-mappen via een deellink. Twee manieren:
 //
-// Inloggen met een Microsoft-account (MSAL, PKCE). Een geplakte deellink wordt
-// via /shares omgezet naar een map; daarna bladeren, zoeken en downloaden.
-// De app-registratie staat in config.js (client-id is geen geheim).
+// 1. Zonder account (standaard): via de Muzivotheek-tussenservice (Cloudflare
+//    Worker, map worker/). Werkt voor links "Iedereen met de link".
+// 2. Met Microsoft-account (reserve): Microsoft Graph met inloggen (MSAL). Voor
+//    links die alleen voor bepaalde personen of een organisatie gelden.
+//
+// Beide geven dezelfde vorm terug (id, name, folder/file, cTag), zodat bladeren,
+// importeren en bijwerken er niets van merken. Alles is alleen-lezen.
 
 import { db, uid } from "./db.js";
 import { importPdf, findBySrc, replaceFile } from "./library.js";
@@ -12,10 +16,42 @@ const SCOPES = ["User.Read", "Files.Read.All"];
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const MSAL_URL = "https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.0/lib/msal-browser.min.js";
 
-export const spConfigured = () => {
+export const graphConfigured = () => {
   const id = CFG().clientId;
   return !!id && !id.startsWith("VUL_");
 };
+export const proxyConfigured = () => /^https:\/\//.test(CFG().proxyUrl || "");
+export const spConfigured = () => graphConfigured() || proxyConfigured();
+
+// ---------- zonder account: tussenservice ----------
+
+async function proxy(kind, params) {
+  const u = new URL(kind, CFG().proxyUrl.replace(/\/?$/, "/"));
+  for (const [k, v] of Object.entries(params)) if (v) u.searchParams.set(k, v);
+  let r;
+  try {
+    r = await fetch(u);
+  } catch (e) {
+    throw new Error("Geen verbinding met SharePoint (internet?)");
+  }
+  if (kind === "file" && r.ok) return r;
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const err = new Error(d.error || "SharePoint gaf fout " + r.status);
+    err.status = d.expired ? 404 : r.status;
+    err.needLogin = !!d.needLogin;
+    throw err;
+  }
+  return d;
+}
+
+// Antwoord van de tussenservice omzetten naar dezelfde vorm als Graph.
+function fromProxy(d) {
+  return [
+    ...d.folders.map((f) => ({ id: f.path, name: f.name, folder: {} })),
+    ...d.files.map((f) => ({ id: f.path, name: f.name, file: {}, size: f.size, cTag: String(f.etag || f.modified || f.size) })),
+  ];
+}
 
 // ---------- inloggen ----------
 
@@ -168,6 +204,7 @@ export async function resolveLink(link, tok) {
 
 // Inhoud van een map. Eerst via de drive; lukt dat niet (gastlink), via de deellink.
 export async function listChildren(src, itemId, tok) {
+  if (src.via === "proxy") return fromProxy(await proxy("list", { link: src.link, path: itemId }));
   const sel = "$select=id,name,folder,file,size,lastModifiedDateTime,cTag,eTag&$top=999";
   const paths = [`/drives/${src.driveId}/items/${itemId}/children?${sel}`, `/shares/${src.sid}/items/${itemId}/children?${sel}`];
   let lastErr;
@@ -204,6 +241,10 @@ export async function listAll(src, itemId, tok, path = [], onProgress) {
 }
 
 async function download(src, itemId, tok) {
+  if (src.via === "proxy") {
+    const r = await proxy("file", { link: src.link, path: itemId });
+    return new File([await r.blob()], itemId.split("/").pop(), { type: "application/pdf" });
+  }
   const meta = await graph(`/drives/${src.driveId}/items/${itemId}?$select=id,name,@microsoft.graph.downloadUrl`, tok).catch(() =>
     graph(`/shares/${src.sid}/items/${itemId}?$select=id,name,@microsoft.graph.downloadUrl`, tok)
   );
@@ -221,22 +262,26 @@ export async function spSources() {
   return (await db.all("sources")).filter((s) => s.type === "sp");
 }
 
-export async function addSource(link) {
+// Eerst zonder account proberen; vraagt de link om inloggen, dan via Microsoft.
+async function resolveAny(link) {
+  if (proxyConfigured()) {
+    try {
+      const d = await proxy("list", { link });
+      return { via: "proxy", name: d.name, driveId: new URL(link).hostname, itemId: d.path, sid: null };
+    } catch (e) {
+      if (!(e.needLogin && graphConfigured())) throw e;
+    }
+  }
+  if (!graphConfigured()) throw new Error("Deze link vraagt om inloggen. Vraag om een link 'Iedereen met de link'.");
   const tok = await token(true);
   const { sid, item } = await resolveLink(link, tok);
   if (!item.folder) throw new Error("Deze link wijst naar een bestand, niet naar een map. Deel de map zelf.");
-  const src = {
-    id: uid(),
-    type: "sp",
-    name: item.name,
-    link: link.trim(),
-    sid,
-    driveId: item.parentReference && item.parentReference.driveId,
-    itemId: item.id,
-    follow: false,
-    added: Date.now(),
-    lastSync: 0,
-  };
+  return { via: "graph", name: item.name, driveId: item.parentReference && item.parentReference.driveId, itemId: item.id, sid };
+}
+
+export async function addSource(link) {
+  const r = await resolveAny(link);
+  const src = { id: uid(), type: "sp", link: link.trim(), follow: false, added: Date.now(), lastSync: 0, ...r };
   await db.put("sources", src.id, src);
   return src;
 }
@@ -244,10 +289,8 @@ export async function addSource(link) {
 // Nieuwe deellink voor een bestaande map (de oude link is verlopen of vervangen).
 // Nummers, krabbels en "volgen" blijven; zelfde bestanden worden herkend.
 export async function relinkSource(src, link) {
-  const tok = await token(true);
-  const { sid, item } = await resolveLink(link, tok);
-  if (!item.folder) throw new Error("Deze link wijst naar een bestand, niet naar een map. Deel de map zelf.");
-  Object.assign(src, { name: item.name, link: link.trim(), sid, driveId: item.parentReference && item.parentReference.driveId, itemId: item.id, broken: false });
+  const r = await resolveAny(link);
+  Object.assign(src, { link: link.trim(), broken: false, ...r });
   await db.put("sources", src.id, src);
   return src;
 }
@@ -263,7 +306,7 @@ export async function isImported(src, it) {
 
 // Gekozen bestanden binnenhalen. items: driveItems met .path (submappen).
 export async function importItems(src, items, onProgress) {
-  const tok = await token(true);
+  const tok = src.via === "proxy" ? null : await token(true);
   let added = 0;
   let updated = 0;
   let i = 0;
@@ -283,13 +326,15 @@ export async function importItems(src, items, onProgress) {
       if (!r.duplicate) added++;
     }
   }
+  src.lastSync = Date.now();
+  await saveSource(src);
   return { added, updated };
 }
 
 // Bijwerken: gewijzigde nummers vervangen; bij "volgen" ook nieuwe toevoegen.
 export async function syncSource(src, { interactive = false, onProgress } = {}) {
-  const tok = await token(interactive);
-  if (!tok) return { added: 0, updated: 0, needLogin: true };
+  const tok = src.via === "proxy" ? null : await token(interactive);
+  if (!tok && src.via !== "proxy") return { added: 0, updated: 0, needLogin: true };
   let all;
   try {
     all = await listAll(src, src.itemId, tok, [], (p) => onProgress && onProgress("Kijken in " + p));

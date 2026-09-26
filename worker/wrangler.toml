@@ -1,0 +1,5 @@
+# Alleen nodig als je de Worker via de opdrachtregel publiceert (npx wrangler deploy).
+# Via het Cloudflare-dashboard plakken kan ook; zie README.md in deze map.
+name = "muzivotheek"
+main = "sharepoint-proxy.js"
+compatibility_date = "2026-09-01"

@@ -51,7 +51,14 @@ bij terugkeren en elk half uur, en toont dan *Nieuwe versie beschikbaar →
 Bijwerken*. Terwijl de lezer open is wacht de melding tot je hem sluit.
 Handmatig kan via Instellingen → *Controleren op updates*.
 
-## SharePoint instellen (eenmalig)
+## SharePoint zonder account
+
+Voor links "Iedereen met de link" haalt de app de map op via een kleine gratis
+tussenservice (Cloudflare Worker, map `worker/`). Geen login en geen beheerder nodig.
+Plaatsen: zie [`worker/README.md`](worker/README.md), daarna het adres in `pwa/config.js`
+bij `proxyUrl`. Links die om inloggen vragen, gaan via de Microsoft-route hieronder.
+
+## SharePoint met Microsoft-account (eenmalig instellen)
 
 De app gebruikt de officiële Microsoft Graph-koppeling. Daarvoor is één
 app-registratie nodig:

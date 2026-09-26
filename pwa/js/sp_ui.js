@@ -1,7 +1,7 @@
 // Schermen voor SharePoint: link plakken, bladeren, zoeken, aanvinken, volgen.
 
 import {
-  spConfigured, account, login, logout, token, looksLikeLink, addSource, spSources, saveSource, removeSource,
+  spConfigured, graphConfigured, account, login, logout, token, looksLikeLink, addSource, spSources, saveSource, removeSource,
   listChildren, listAll, isPdf, isImported, importItems, syncSource, msal, relinkSource,
 } from "./sharepoint.js";
 import { $, h, fill, toast, dialog, confirmDlg, promptDlg, menu } from "./ui.js";
@@ -120,7 +120,7 @@ export async function fixBrokenLinks(broken) {
 
 // Na terugkomst van een inlog-doorverwijzing: afmaken waar we gebleven waren.
 export async function resumeAfterRedirect() {
-  if (!spConfigured()) return;
+  if (!graphConfigured()) return;
   const flagged = localStorage.getItem("muzi.sp.resume");
   const hasCode = /[#&?](code|error)=/.test(location.hash + location.search);
   if (!flagged && !hasCode) return;
@@ -148,13 +148,15 @@ export async function resumeAfterRedirect() {
 // ---------- bladeren ----------
 
 async function browse(src) {
-  let tok;
-  try {
-    tok = await token(true);
-  } catch (e) {
-    return toast(e.message || "Inloggen mislukt", 3000);
+  let tok = null;
+  if (src.via !== "proxy") {
+    try {
+      tok = await token(true);
+    } catch (e) {
+      return toast(e.message || "Inloggen mislukt", 3000);
+    }
+    if (!tok) return;
   }
-  if (!tok) return;
 
   const stack = [{ id: src.itemId, name: src.name }];
   const selected = new Map(); // id -> item (met .path)
@@ -302,7 +304,9 @@ export async function spSettings(rerender, group) {
   const acc = await account();
   const sources = await spSources();
   const rows = [];
-  rows.push(
+  // Inloggen is alleen nodig voor links die niet voor "iedereen" zijn.
+  const showLogin = graphConfigured() && (acc || sources.some((s) => s.via !== "proxy"));
+  if (showLogin) rows.push(
     h(
       "div",
       { class: "set-row" },
@@ -360,7 +364,7 @@ export async function spSettings(rerender, group) {
     );
   }
   rows.push(
-    h("p", { class: "set-s pad-x" }, "Plak de link van een gedeelde SharePoint-map. Je logt in met je Microsoft-account; je muziek blijft daarna ook zonder internet op dit apparaat."),
+    h("p", { class: "set-s pad-x" }, "Plak de link van een gedeelde SharePoint-map. Bij een link 'Iedereen met de link' is geen account nodig. De muziek blijft daarna ook zonder internet op dit apparaat."),
     h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", onclick: async () => { const s = await askLink(); if (s) { rerender(); browse(s); } }, html: icon("link") + "<span>SharePoint-map koppelen</span>" }))
   );
   return group("SharePoint", ...rows);

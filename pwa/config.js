@@ -6,4 +6,7 @@ window.MUZI_CONFIG = {
   // "common" = inloggen met werk-/schoolaccounts van elke organisatie én
   // persoonlijke Microsoft-accounts.
   authority: "https://login.microsoftonline.com/common",
+  // Adres van de tussenservice (Cloudflare Worker, zie worker/README.md). Hiermee
+  // werken links "Iedereen met de link" zonder account. Leeg = alleen via inloggen.
+  proxyUrl: "",
 };
