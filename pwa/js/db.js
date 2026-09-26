@@ -7,10 +7,11 @@
 //   notes       krabbels per pagina, sleutel "<songId>:<pagina>"
 //   audio       gekoppelde audiobestanden
 //   setlists    afspeellijsten met geordende songIds
+//   sources     gekoppelde mappen (apparaat of SharePoint) waar nummers vandaan komen
 
 const DB_NAME = "muzivotheek";
-const DB_VERSION = 1;
-const STORES = ["songs", "files", "thumbs", "notes", "audio", "setlists"];
+const DB_VERSION = 2;
+const STORES = ["songs", "files", "thumbs", "notes", "audio", "setlists", "sources"];
 
 let dbPromise = null;
 
@@ -24,7 +25,11 @@ function open() {
         if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // Nieuwere versie in een ander venster: loslaten zodat die kan bijwerken.
+      req.result.onversionchange = () => req.result.close();
+      resolve(req.result);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;

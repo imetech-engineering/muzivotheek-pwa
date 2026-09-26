@@ -1,4 +1,9 @@
 /* Muzivotheek. Kleuren afgeleid van het Eendracht Aalten-logo. */
+@font-face {
+  font-family: "Muzi Music";
+  src: url("../vendor/fonts/noto-music.woff2") format("woff2");
+  font-display: block;
+}
 :root {
   --blue: #465e9e;
   --blue-d: #36497d;
@@ -1135,7 +1140,7 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
 .v-stage {
   position: absolute;
   inset: 0;
-  overflow: auto;
+  overflow: hidden;
   touch-action: none;
   scrollbar-width: none;
   outline: none;
@@ -1143,21 +1148,25 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
 .v-stage::-webkit-scrollbar {
   display: none;
 }
+.v-cam {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
 .v-pages {
-  min-width: 100%;
-  min-height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  width: max-content;
-  margin: 0 auto;
 }
 .v-pages.scroll {
   flex-direction: column;
   justify-content: flex-start;
+  align-items: center;
   gap: 8px;
-  padding: 0 0 40vh;
+  padding-bottom: 40vh;
 }
 .v-slot {
   background: #fff;
@@ -1173,6 +1182,8 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
 .v-ink {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   display: block;
 }
 .v-ink {
@@ -1647,3 +1658,97 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
 body.viewing .update-bar {
   display: none;
 }
+
+/* ---------- tekenkiezer ---------- */
+.f-m {
+  font-family: "Muzi Music", serif;
+}
+.f-i {
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-weight: 600;
+}
+.f-t {
+  font-weight: 600;
+}
+.stamp-picker h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pink);
+  margin: 10px 0 6px;
+}
+.stamp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+  gap: 6px;
+}
+.stamp-opt {
+  height: 62px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #111;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.stamp-opt.on {
+  border: 2px solid var(--pink);
+}
+.stamp-opt .glyph {
+  font-size: 30px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.stamp-opt .glyph.f-i,
+.stamp-opt .glyph.f-t {
+  font-size: 17px;
+}
+.tstamp-btn {
+  min-width: 52px;
+  height: 46px;
+  border-radius: 14px;
+  border: 0;
+  background: #fff;
+  color: #111;
+  font-size: 26px;
+  line-height: 1;
+  padding: 0 8px;
+  flex: none;
+  white-space: nowrap;
+}
+.tstamp-btn.f-i,
+.tstamp-btn.f-t {
+  font-size: 16px;
+}
+.tsize {
+  font-weight: 800;
+  font-size: 22px;
+}
+.tsize.small {
+  font-size: 14px;
+}
+
+/* ---------- gekoppelde mappen ---------- */
+.sync-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 50px;
+  margin-bottom: 10px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 2px solid var(--pink);
+  background: var(--card);
+  color: var(--pink);
+  font-weight: 700;
+  text-align: left;
+}
+.row-btns {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.empty .btn.second { margin-top: 12px; }

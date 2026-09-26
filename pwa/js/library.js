@@ -41,7 +41,7 @@ export function titleFromFilename(name) {
 export async function importPdf(file, extra = {}) {
   await allSongs();
   const title = titleFromFilename(file.name || "Naamloos");
-  const dup = [...songs.values()].find((s) => s.fileName === file.name && s.fileSize === file.size);
+  const dup = [...songs.values()].find((s) => (extra.src && s.src === extra.src) || (s.fileName === file.name && s.fileSize === file.size));
   if (dup) return { song: dup, duplicate: true };
 
   const blob = file instanceof Blob ? file : new Blob([file], { type: "application/pdf" });
@@ -70,12 +70,33 @@ export async function importPdf(file, extra = {}) {
     bookmarks: [], // {page, label}
     links: [], // {page, x, y, to}
     audioId: null,
+    src: extra.src || null, // herkomst (gekoppelde map), om later wijzigingen te zien
+    srcVersion: extra.srcVersion || null,
   };
   doc.destroy();
   await db.put("files", id, blob);
   if (thumb) await db.put("thumbs", id, thumb);
   await saveSong(song);
   return { song, duplicate: false };
+}
+
+// Nieuwe versie van de PDF uit de bron: bestand vervangen, gegevens en krabbels houden.
+export async function replaceFile(song, file, srcVersion) {
+  const blob = file instanceof Blob ? file : new Blob([file], { type: "application/pdf" });
+  const doc = await loadPdf(blob);
+  const thumb = await makeThumb(doc).catch(() => null);
+  song.pages = doc.numPages;
+  doc.destroy();
+  song.fileSize = blob.size;
+  song.srcVersion = srcVersion || null;
+  await db.put("files", song.id, blob);
+  if (thumb) await db.put("thumbs", song.id, thumb);
+  await saveSong(song);
+  document.dispatchEvent(new CustomEvent("thumb-changed", { detail: song.id }));
+}
+
+export async function findBySrc(src) {
+  return (await allSongs()).find((s) => s.src === src) || null;
 }
 
 export async function deleteSong(id) {

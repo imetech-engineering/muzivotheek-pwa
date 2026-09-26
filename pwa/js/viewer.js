@@ -8,9 +8,9 @@ import { loadPdf, renderPage, pageAspect, findContentBox } from "./pdf.js";
 import { getSong, saveSong, markOpened } from "./library.js";
 import { getSetlist } from "./setlists.js";
 import { settings, setSetting } from "./settings.js";
-import { loadInk, saveInk, drawInk, hitTest, STAMPS, DYNAMICS, COLORS } from "./ink.js";
+import { loadInk, saveInk, drawInk, hitTest, STAMP_GROUPS, STAMP_SIZES, COLORS, loadMusicFont } from "./ink.js";
 import { Metronome, tempoName } from "./metronome.js";
-import { $, h, fill, toast, promptDlg, confirmDlg, menu, fmtTime } from "./ui.js";
+import { $, h, fill, toast, dialog, promptDlg, confirmDlg, menu, fmtTime } from "./ui.js";
 import { icon } from "./icons.js";
 
 const root = () => $("#viewer");
@@ -23,7 +23,6 @@ const st = {
   pages: 0,
   page: 1,
   half: false, // halve-pagina-stand (onderste helft huidige + bovenste helft volgende)
-  zoom: 1,
   boxes: new Map(), // pagina -> inhoudsvak (bijsnijden)
   aspects: new Map(),
   ink: new Map(), // pagina -> items
@@ -32,7 +31,8 @@ const st = {
   list: null, // afspeellijst
   listIndex: 0,
   tool: null, // null | "pen" | "marker" | "eraser" | "text" | "link"
-  stamp: "mf",
+  stamp: null,
+  selected: null, // geselecteerd teken {page, item}
   undo: [],
   returnPage: 0,
   autoScroll: false,
@@ -55,6 +55,7 @@ export async function openSong(songId, opts = {}) {
   if (!st.open) {
     st.open = true;
     buildDom();
+    loadMusicFont().then(() => st.open && document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk));
     root().hidden = false;
     document.body.classList.add("viewing");
     history.pushState({ viewer: true }, "");
@@ -76,7 +77,9 @@ export async function openSong(songId, opts = {}) {
   st.pages = st.doc.numPages;
   st.page = Math.min(Math.max(1, opts.page || 1), st.pages);
   st.half = false;
-  st.zoom = 1;
+  cam.x = cam.y = 0;
+  cam.z = 1;
+  st.selected = null;
   st.boxes.clear();
   st.aspects.clear();
   st.cache.clear();
@@ -150,7 +153,9 @@ function btn(ic, label, onclick, cls = "") {
 function buildDom() {
   const r = root();
   r.innerHTML = "";
-  const stage = h("div", { class: "v-stage", id: "v-stage" }, h("div", { class: "v-pages", id: "v-pages" }));
+  // De "camera": alle pagina's staan in #v-cam; zoomen en schuiven is één
+  // transform op dat element. Er wordt nooit native gescrold, dus niets verspringt.
+  const stage = h("div", { class: "v-stage", id: "v-stage" }, h("div", { class: "v-cam", id: "v-cam" }, h("div", { class: "v-pages", id: "v-pages" })));
   const flash = h("div", { class: "v-flash", id: "v-flash" });
 
   const top = h(
@@ -186,26 +191,148 @@ function buildDom() {
 
   r.append(stage, flash, top, bottom, tools, panel, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
   attachGestures(stage);
-  new ResizeObserver(() => st.open && debounceRender()).observe(stage);
+  let lastSize = "";
+  new ResizeObserver(() => {
+    const s = stage.clientWidth + "x" + stage.clientHeight;
+    if (st.open && s !== lastSize) {
+      lastSize = s;
+      debounceRender();
+    }
+  }).observe(stage);
 }
 
 let renderTimer = 0;
 function debounceRender() {
   clearTimeout(renderTimer);
-  renderTimer = setTimeout(() => {
-    st.cache.clear();
-    render();
-  }, 120);
+  renderTimer = setTimeout(() => render(), 120);
+}
+
+// ---------- camera (zoom + schuiven) ----------
+
+const cam = { x: 0, y: 0, z: 1 };
+const MAX_ZOOM = 5;
+let camRaf = 0;
+let camAnim = 0;
+let camTarget = null;
+
+function stageSize() {
+  const s = $("#v-stage");
+  return { W: s.clientWidth, H: s.clientHeight };
+}
+
+function contentSize() {
+  const c = $("#v-pages");
+  return { w: c.offsetWidth, h: c.offsetHeight };
+}
+
+// Houd de inhoud in beeld: kleiner dan het scherm = centreren, groter = niet voorbij de rand.
+function clampCam(c = cam) {
+  const { W, H } = stageSize();
+  const { w, h: ch } = contentSize();
+  const sw = w * c.z;
+  const sh = ch * c.z;
+  c.x = sw <= W ? (W - sw) / 2 : Math.min(0, Math.max(W - sw, c.x));
+  c.y = sh <= H ? (H - sh) / 2 : Math.min(0, Math.max(H - sh, c.y));
+  return c;
+}
+
+function applyCam() {
+  if (camRaf) return;
+  camRaf = requestAnimationFrame(() => {
+    camRaf = 0;
+    const el = $("#v-cam");
+    if (el) el.style.transform = `translate3d(${cam.x}px, ${cam.y}px, 0) scale(${cam.z})`;
+    root().classList.toggle("zoomed", cam.z > 1.01);
+    if (root().dataset.mode === "scroll") trackScrollPage();
+  });
+}
+
+function stopCamAnim() {
+  cancelAnimationFrame(camAnim);
+  camAnim = 0;
+}
+
+function animateCam(target, ms = 220, done) {
+  stopCamAnim();
+  clampCam(target);
+  camTarget = target;
+  const from = { ...cam };
+  const t0 = performance.now();
+  const frame = (now) => {
+    const k = Math.min(1, (now - t0) / ms);
+    const e = 1 - Math.pow(1 - k, 3);
+    cam.x = from.x + (target.x - from.x) * e;
+    cam.y = from.y + (target.y - from.y) * e;
+    cam.z = from.z + (target.z - from.z) * e;
+    applyCam();
+    if (k < 1) camAnim = requestAnimationFrame(frame);
+    else {
+      camAnim = 0;
+      done && done();
+    }
+  };
+  camAnim = requestAnimationFrame(frame);
+}
+
+// Zoom naar z met het punt (sx, sy) op het scherm vast.
+function zoomAt(z, sx, sy, animate = true) {
+  z = Math.max(1, Math.min(MAX_ZOOM, z));
+  const px = (sx - cam.x) / cam.z;
+  const py = (sy - cam.y) / cam.z;
+  const t = { x: sx - px * z, y: sy - py * z, z };
+  if (animate) animateCam(t, 220, sharpenSoon);
+  else {
+    Object.assign(cam, clampCam(t));
+    applyCam();
+    sharpenSoon();
+  }
+}
+
+function zoomCenter(factor) {
+  const { W, H } = stageSize();
+  // Snel achter elkaar tikken: verder rekenen vanaf waar de animatie heen ging.
+  if (camAnim && camTarget) {
+    stopCamAnim();
+    Object.assign(cam, camTarget);
+  }
+  zoomAt(cam.z * factor, W / 2, H / 2);
+}
+
+// Na het zoomen de pagina's scherper tekenen (zelfde maat op het scherm, meer pixels).
+let sharpenTimer = 0;
+function sharpenSoon() {
+  clearTimeout(sharpenTimer);
+  sharpenTimer = setTimeout(sharpen, 180);
+}
+
+async function sharpen() {
+  if (!st.open) return;
+  const token = st.token;
+  for (const el of document.querySelectorAll("#v-pages .v-page")) {
+    if (token !== st.token) return;
+    const want = targetRes(el._w, el._box, el._aspect);
+    if (Math.abs(want - el._res) / el._res < 0.15) continue;
+    const sheet = await getSheet(el._p, el._box, el._aspect, want);
+    if (token !== st.token) return;
+    const c = el._sheet;
+    c.width = sheet.width;
+    c.height = sheet.height;
+    c.getContext("2d").drawImage(sheet, 0, 0);
+    el._res = want;
+    el._ink.width = sheet.width;
+    el._ink.height = sheet.height;
+    drawPageInk(el);
+  }
 }
 
 // ---------- weergave ----------
 
 function effectiveMode() {
-  const stage = $("#v-stage");
-  const landscape = stage.clientWidth > stage.clientHeight * 1.15;
+  const { W, H } = stageSize();
+  const landscape = W > H * 1.15;
   let m = S().viewMode;
   if (st.autoScroll) return "scroll";
-  if (m === "single" && landscape && S().autoDouble && st.pages > 1) m = "double";
+  if (m === "auto") m = landscape && st.pages > 1 ? "double" : "single";
   if (m === "double" && st.pages < 2) m = "single";
   return m;
 }
@@ -229,61 +356,96 @@ async function getInk(p) {
   return st.ink.get(p);
 }
 
-// Maak het element voor één pagina, passend in slotW x slotH (css-pixels).
+const DPR = () => Math.min(window.devicePixelRatio || 1, 3);
+
+// Aantal pixels in de breedte voor een pagina die w css-pixels breed is.
+function targetRes(w, box, aspect) {
+  let px = w * DPR() * Math.max(1, cam.z);
+  // Geheugen van tablets sparen: hele pagina hooguit ~12 megapixel.
+  px = Math.min(px, 4096, box.w * Math.sqrt(12e6 / aspect));
+  return Math.round(px);
+}
+
+// Bijgesneden pagina als canvas van pixelW breed (met cache).
+async function getSheet(p, box, aspect, pixelW) {
+  const key = `${p}:${pixelW}:${S().autoCrop ? 1 : 0}`;
+  let sheet = st.cache.get(key);
+  if (sheet) {
+    st.cache.delete(key);
+    st.cache.set(key, sheet);
+    return sheet;
+  }
+  const ca = (box.h * aspect) / box.w;
+  const full = await renderPage(st.doc, p, pixelW / box.w);
+  sheet = document.createElement("canvas");
+  sheet.width = pixelW;
+  sheet.height = Math.round(pixelW * ca);
+  const sctx = sheet.getContext("2d", { alpha: false });
+  sctx.imageSmoothingQuality = "high";
+  sctx.drawImage(full, box.x * full.width, box.y * full.height, box.w * full.width, box.h * full.height, 0, 0, sheet.width, sheet.height);
+  full.width = full.height = 0;
+  st.cache.set(key, sheet);
+  if (st.cache.size > 8) {
+    const old = st.cache.keys().next().value;
+    const c = st.cache.get(old);
+    c.width = c.height = 0;
+    st.cache.delete(old);
+  }
+  return sheet;
+}
+
+// Element voor één pagina, passend in slotW x slotH (css-pixels, zoom 1).
 async function pageEl(p, slotW, slotH, fitWidthOnly = false) {
   const aspect = await getAspect(p);
   const box = await getBox(p);
-  const ca = (box.h * aspect) / box.w; // hoogte/breedte van zichtbare deel
-  let w = fitWidthOnly ? slotW : Math.min(slotW, slotH / ca);
-  w = Math.floor(w * st.zoom);
+  const ca = (box.h * aspect) / box.w;
+  const w = Math.floor(fitWidthOnly ? slotW : Math.min(slotW, slotH / ca));
   const hgt = Math.floor(w * ca);
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const res = targetRes(w, box, aspect);
+  const sheet = await getSheet(p, box, aspect, res);
 
-  const key = `${p}:${w}:${S().autoCrop ? 1 : 0}`;
-  let sheet = st.cache.get(key);
-  if (!sheet) {
-    // Volledige pagina renderen zo groot dat het bijgesneden deel scherp is.
-    let fullW = (w / box.w) * dpr;
-    const maxPx = 5000;
-    fullW = Math.min(fullW, maxPx, Math.sqrt((24e6 * 1) / aspect));
-    const full = await renderPage(st.doc, p, fullW);
-    sheet = document.createElement("canvas");
-    const pw = Math.round(Math.min(w * dpr, full.width * box.w));
-    sheet.width = pw;
-    sheet.height = Math.round(pw * ca);
-    const sctx = sheet.getContext("2d", { alpha: false });
-    sctx.imageSmoothingQuality = "high";
-    sctx.drawImage(full, box.x * full.width, box.y * full.height, box.w * full.width, box.h * full.height, 0, 0, sheet.width, sheet.height);
-    full.width = full.height = 0;
-    st.cache.set(key, sheet);
-    if (st.cache.size > 10) st.cache.delete(st.cache.keys().next().value);
-  }
   const shown = document.createElement("canvas");
   shown.width = sheet.width;
   shown.height = sheet.height;
   shown.getContext("2d").drawImage(sheet, 0, 0);
   shown.className = "v-sheet";
-  shown.style.width = w + "px";
-  shown.style.height = hgt + "px";
 
   const ink = h("canvas", { class: "v-ink" });
-  ink.width = Math.round(w * dpr);
-  ink.height = Math.round(hgt * dpr);
-  ink.style.width = w + "px";
-  ink.style.height = hgt + "px";
+  ink.width = sheet.width;
+  ink.height = sheet.height;
 
   const el = h("div", { class: "v-page", dataset: { page: p } }, shown, ink);
   el.style.width = w + "px";
   el.style.height = hgt + "px";
-  el._box = box;
-  el._aspect = aspect;
-  el._ink = ink;
-  const items = await getInk(p);
-  if (S().showNotes) drawInk(ink.getContext("2d"), items, box, ink.width, ink.height);
+  Object.assign(el, { _p: p, _w: w, _h: hgt, _box: box, _aspect: aspect, _ink: ink, _sheet: shown, _res: res, _args: [p, slotW, slotH, fitWidthOnly] });
+  await getInk(p);
+  drawPageInk(el);
+  addLinks(el);
+  return el;
+}
 
-  // Sprong-knopjes.
+function drawPageInk(el) {
+  const items = S().showNotes ? st.ink.get(el._p) || [] : [];
+  drawInk(el._ink.getContext("2d"), items, el._box, el._ink.width, el._ink.height, st.selected && st.selected.page === el._p ? st.selected.item : null);
+}
+
+// Alleen de krabbel-laag opnieuw tekenen (geen nieuwe opmaak, dus niets verspringt).
+function refreshInk(p) {
+  document.querySelectorAll(`#v-pages .v-page[data-page="${p}"]`).forEach(drawPageInk);
+}
+
+// Pagina opnieuw opbouwen op dezelfde plek en maat (bijv. na nieuwe sprong).
+async function refreshPage(p) {
+  for (const el of document.querySelectorAll(`#v-pages .v-page[data-page="${p}"]`)) {
+    const n = await pageEl(...el._args);
+    el.replaceWith(n);
+  }
+}
+
+function addLinks(el) {
+  const box = el._box;
   for (const [i, ln] of (st.song.links || []).entries()) {
-    if (ln.page !== p) continue;
+    if (ln.page !== el._p) continue;
     const lx = ((ln.x - box.x) / box.w) * 100;
     const ly = ((ln.y - box.y) / box.h) * 100;
     if (lx < 0 || lx > 100 || ly < 0 || ly > 100) continue;
@@ -294,7 +456,6 @@ async function pageEl(p, slotW, slotH, fitWidthOnly = false) {
           type: "button",
           class: "v-link",
           style: `left:${lx}%;top:${ly}%`,
-          dataset: { link: i },
           onpointerdown: (e) => e.stopPropagation(),
           onpointerup: (e) => e.stopPropagation(),
           onclick: (e) => {
@@ -306,60 +467,63 @@ async function pageEl(p, slotW, slotH, fitWidthOnly = false) {
       )
     );
   }
-  return el;
 }
 
-async function render() {
+async function render(keepCam = false) {
   if (!st.doc || !st.open || !$("#v-stage")) return;
   try {
-    await renderInner();
+    await renderInner(keepCam);
   } catch (e) {
     if (st.open) console.error(e);
   }
 }
 
-async function renderInner() {
+async function renderInner(keepCam) {
   const token = ++st.token;
-  const stage = $("#v-stage");
   const wrap = $("#v-pages");
-  const W = stage.clientWidth;
-  const H = stage.clientHeight;
+  const { W, H } = stageSize();
   const mode = effectiveMode();
-  root().dataset.mode = mode;
   root().classList.toggle("night", !!S().nightSheet);
-  root().classList.toggle("zoomed", st.zoom > 1.01);
 
-  if (mode === "scroll") return renderScroll(token, W, H);
-  stage.onscroll = null;
+  if (mode === "scroll") {
+    root().dataset.mode = mode;
+    return renderScroll(token, W, H);
+  }
 
   const gap = 6;
-  let els = [];
+  const els = [];
   if (mode === "double") {
-    const p = st.page;
-    const a = await pageEl(p, (W - gap) / 2, H);
-    els.push(a);
-    if (p + 1 <= st.pages) els.push(await pageEl(p + 1, (W - gap) / 2, H));
+    els.push(await pageEl(st.page, (W - gap) / 2, H));
+    if (st.page + 1 <= st.pages) els.push(await pageEl(st.page + 1, (W - gap) / 2, H));
   } else if (st.half && st.page < st.pages) {
     const cur = await pageEl(st.page, W, H);
-    const next = await pageEl(st.page + 1, W, H);
-    const hh = Math.max(parseFloat(cur.style.height), parseFloat(next.style.height));
-    const ww = Math.max(parseFloat(cur.style.width), parseFloat(next.style.width));
-    const topHalf = h("div", { class: "v-halfpart top" }, next);
-    const botHalf = h("div", { class: "v-halfpart bottom" }, cur);
-    topHalf.style.height = botHalf.style.height = hh / 2 + "px";
-    const comp = h("div", { class: "v-half" }, topHalf, h("div", { class: "v-halfline" }), botHalf);
-    comp.style.width = ww + "px";
+    const nxt = await pageEl(st.page + 1, W, H);
+    // halfOrder "curTop": boven = onderste helft van deze pagina, onder = bovenste helft van de volgende.
+    const parts = S().halfOrder === "nextTop" ? [[nxt, "top"], [cur, "bottom"]] : [[cur, "bottom"], [nxt, "top"]];
+    const comp = h("div", { class: "v-half" });
+    parts.forEach(([el, half], i) => {
+      const part = h("div", { class: "v-halfpart " + half }, el);
+      part.style.height = el._h / 2 + "px";
+      comp.append(part);
+      if (i === 0) comp.append(h("div", { class: "v-halfline" }));
+    });
+    comp.style.width = Math.max(cur._w, nxt._w) + "px";
     els.push(comp);
   } else {
     els.push(await pageEl(st.page, W, H));
   }
   if (token !== st.token) return;
+  root().dataset.mode = mode;
   wrap.className = "v-pages paged";
+  wrap.style.width = W + "px";
+  wrap.style.height = H + "px";
   fill(wrap, ...els);
-  stage.scrollTop = 0;
-  stage.scrollLeft = zoomScrollTarget ? zoomScrollTarget.x : 0;
-  if (zoomScrollTarget) stage.scrollTop = zoomScrollTarget.y;
-  zoomScrollTarget = null;
+  if (!keepCam) {
+    // Zelfde zoom houden, maar bovenaan de (nieuwe) pagina beginnen.
+    cam.y = 0;
+  }
+  clampCam();
+  applyCam();
   updateChrome();
   prerender(W, H, mode);
 }
@@ -368,32 +532,44 @@ async function renderInner() {
 function prerender(W, H, mode) {
   const n = mode === "double" ? 2 : 1;
   const slot = mode === "double" ? (W - 6) / 2 : W;
-  const want = [];
-  for (let i = 0; i < n + 1; i++) want.push(st.page + n + i);
   const token = st.token;
   setTimeout(async () => {
-    for (const p of want) {
+    for (let i = 0; i < n + 1; i++) {
+      const p = st.page + n + i;
       if (token !== st.token || p > st.pages) return;
-      await pageEl(p, slot, H).catch(() => {});
+      const aspect = await getAspect(p);
+      const box = await getBox(p);
+      const ca = (box.h * aspect) / box.w;
+      const w = Math.floor(Math.min(slot, H / ca));
+      await getSheet(p, box, aspect, targetRes(w, box, aspect)).catch(() => {});
     }
   }, 150);
 }
 
+let scrollSlots = [];
 async function renderScroll(token, W, H) {
-  const stage = $("#v-stage");
   const wrap = $("#v-pages");
-  const colW = Math.min(W, Math.max(H * 0.9, W * 0.7));
-  wrap.className = "v-pages scroll";
-  const placeholders = [];
+  const colW = Math.floor(Math.min(W, Math.max(H * 0.9, W * 0.7)));
+  const slots = [];
   for (let p = 1; p <= st.pages; p++) {
     const aspect = await getAspect(p);
+    const box = st.boxes.get(p) || (S().autoCrop ? { x: 0, y: 0, w: 1, h: 0.9 } : { x: 0, y: 0, w: 1, h: 1 });
     const ph = h("div", { class: "v-slot", dataset: { page: p } });
-    ph.style.width = Math.floor(colW * st.zoom) + "px";
-    ph.style.height = Math.floor(colW * st.zoom * aspect * 0.9) + "px";
-    placeholders.push(ph);
+    ph.style.width = colW + "px";
+    ph.style.height = Math.floor((colW * box.h * aspect) / box.w) + "px";
+    slots.push(ph);
   }
   if (token !== st.token) return;
-  fill(wrap, ...placeholders);
+  scrollSlots = slots;
+  wrap.className = "v-pages scroll";
+  wrap.style.width = W + "px";
+  wrap.style.height = "";
+  fill(wrap, ...slots);
+  const target = slots[st.page - 1];
+  cam.y = target ? -target.offsetTop * cam.z : 0;
+  clampCam();
+  applyCam();
+
   const io = new IntersectionObserver(
     (entries) => {
       for (const en of entries) {
@@ -403,28 +579,33 @@ async function renderScroll(token, W, H) {
         pageEl(p, colW, H, true).then((el) => {
           if (token !== st.token) return;
           const before = en.target.offsetHeight;
+          const aboveView = (en.target.offsetTop + before) * cam.z + cam.y < 0;
           fill(en.target, el);
           en.target.style.height = el.style.height;
-          // Scrollpositie vasthouden als een pagina boven het beeld van hoogte verandert.
-          if (en.target.offsetTop < stage.scrollTop) stage.scrollTop += el.offsetHeight - before;
+          // Pagina boven het beeld werd hoger of lager: beeld vasthouden.
+          if (aboveView) {
+            cam.y -= (el._h - before) * cam.z;
+            clampCam();
+            applyCam();
+          }
         });
       }
     },
-    { root: stage, rootMargin: "150% 0px" }
+    { root: $("#v-stage"), rootMargin: "150% 0px" }
   );
-  placeholders.forEach((p) => io.observe(p));
-  const target = placeholders[st.page - 1];
-  if (target) stage.scrollTop = target.offsetTop;
-  stage.onscroll = () => {
-    const mid = stage.scrollTop + H * 0.35;
-    let cur = 1;
-    for (const ph of placeholders) if (ph.offsetTop <= mid) cur = +ph.dataset.page;
-    if (cur !== st.page) {
-      st.page = cur;
-      updateChrome();
-    }
-  };
+  slots.forEach((s) => io.observe(s));
   updateChrome();
+}
+
+function trackScrollPage() {
+  const { H } = stageSize();
+  const mid = (-cam.y + H * 0.35) / cam.z;
+  let cur = 1;
+  for (const s of scrollSlots) if (s.offsetTop <= mid) cur = +s.dataset.page;
+  if (cur !== st.page) {
+    st.page = cur;
+    updateChrome();
+  }
 }
 
 function updateChrome() {
@@ -437,7 +618,7 @@ function updateChrome() {
   if (st.song.bpm) bits.push(st.song.bpm + " bpm");
   $("#v-t2").textContent = bits.join(" · ");
   const mode = root().dataset.mode;
-  const last = mode === "double" ? Math.min(st.pages, st.page + 1) : st.page;
+  const last = mode === "double" ? Math.min(st.pages, st.page + 1) : st.half ? st.page + 1 : st.page;
   $("#v-count").textContent = (last > st.page ? `${st.page}-${last}` : st.page) + " / " + st.pages;
   const sl = $("#v-slider");
   sl.max = st.pages;
@@ -457,15 +638,37 @@ function step() {
   return root().dataset.mode === "double" ? 2 : 1;
 }
 
+// Ingezoomd: eerst verder naar beneden schuiven, pas aan de onderkant omslaan.
+function panPage(dir) {
+  const { H } = stageSize();
+  const { h: ch } = contentSize();
+  const minY = H - ch * cam.z;
+  if (dir > 0 && cam.y > minY + 2) {
+    animateCam({ x: cam.x, y: cam.y - H * 0.85, z: cam.z });
+    return true;
+  }
+  if (dir < 0 && cam.y < -2) {
+    animateCam({ x: cam.x, y: cam.y + H * 0.85, z: cam.z });
+    return true;
+  }
+  return false;
+}
+
 export function next() {
   if (!st.open) return;
-  if (root().dataset.mode === "scroll") return scrollBy(1);
-  if (st.zoom > 1.01 && scrollZoomed(1)) return;
-  if (S().halfTurn && root().dataset.mode === "single" && !st.half && st.page < st.pages) {
+  const mode = root().dataset.mode;
+  if (mode === "scroll") return scrollBy(1);
+  if (cam.z > 1.01 && panPage(1)) return;
+  if (S().halfTurn && mode === "single" && !st.half && st.page < st.pages) {
     st.half = true;
     return render();
   }
-  st.half = false;
+  if (st.half) {
+    st.half = false;
+    st.page += 1;
+    turnAnim(1);
+    return render();
+  }
   if (st.page + step() <= st.pages) {
     st.page += step();
     turnAnim(1);
@@ -479,8 +682,9 @@ export function next() {
 
 export function prev() {
   if (!st.open) return;
-  if (root().dataset.mode === "scroll") return scrollBy(-1);
-  if (st.zoom > 1.01 && scrollZoomed(-1)) return;
+  const mode = root().dataset.mode;
+  if (mode === "scroll") return scrollBy(-1);
+  if (cam.z > 1.01 && panPage(-1)) return;
   if (st.half) {
     st.half = false;
     return render();
@@ -500,8 +704,13 @@ function goto(p) {
   st.page = Math.min(Math.max(1, p), st.pages);
   st.half = false;
   if (root().dataset.mode === "scroll") {
-    const el = $(`#v-pages .v-slot[data-page="${st.page}"]`);
-    if (el) $("#v-stage").scrollTop = el.offsetTop;
+    const el = scrollSlots[st.page - 1];
+    if (el) {
+      stopCamAnim();
+      cam.y = -el.offsetTop * cam.z;
+      clampCam();
+      applyCam();
+    }
     updateChrome();
   } else render();
 }
@@ -518,23 +727,8 @@ async function gotoSong(dir, toEnd = false) {
 }
 
 function scrollBy(dir) {
-  const stage = $("#v-stage");
-  stage.scrollBy({ top: dir * stage.clientHeight * 0.85, behavior: "smooth" });
-}
-
-// Bij inzoomen: eerst naar beneden/opzij schuiven voordat er wordt omgeslagen.
-function scrollZoomed(dir) {
-  const s = $("#v-stage");
-  const maxY = s.scrollHeight - s.clientHeight;
-  if (dir > 0 && s.scrollTop < maxY - 4) {
-    s.scrollBy({ top: s.clientHeight * 0.85, behavior: "smooth" });
-    return true;
-  }
-  if (dir < 0 && s.scrollTop > 4) {
-    s.scrollBy({ top: -s.clientHeight * 0.85, behavior: "smooth" });
-    return true;
-  }
-  return false;
+  const { H } = stageSize();
+  animateCam({ x: cam.x, y: cam.y - dir * H * 0.85, z: cam.z }, 300);
 }
 
 function turnAnim(dir) {
@@ -563,36 +757,49 @@ const chromeVisible = () => root().classList.contains("chrome");
 const panelOpen = () => !!$("#v-panel") && !$("#v-panel").hidden;
 
 // ---------- gebaren ----------
-
-let zoomScrollTarget = null;
+//
+// 1 vinger: tikken (omslaan / knoppen), vegen (omslaan), schuiven als ingezoomd.
+// 2 vingers: knijpen = zoomen, samen bewegen = schuiven. Werkt ook in tekenstand.
 
 function attachGestures(stage) {
   const pts = new Map();
-  let start = null;
-  let pinch = null;
+  let g = null; // huidig gebaar
   let lastTap = null;
-  let drawing = null;
-  let pan = null;
-  let vel = { x: 0, y: 0 };
   let inertia = 0;
 
+  const local = (e) => {
+    const r = stage.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  const canPan = () => cam.z > 1.01 || root().dataset.mode === "scroll";
+
+  function startPinch() {
+    const [a, b] = [...pts.values()];
+    g = {
+      type: "pinch",
+      d0: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)),
+      m0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      cam0: { ...cam },
+    };
+  }
+
+  function startPan(p, e) {
+    g = { type: "pending", x0: p.x, y0: p.y, t0: performance.now(), cam0: { ...cam }, vx: 0, vy: 0, lx: p.x, ly: p.y, lt: performance.now(), e };
+  }
+
   stage.addEventListener("pointerdown", (e) => {
+    stopCamAnim();
     cancelAnimationFrame(inertia);
     stage.setPointerCapture(e.pointerId);
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = local(e);
+    pts.set(e.pointerId, p);
     if (e.pointerType === "pen") st.penSeen = true;
 
     if (pts.size === 2) {
-      // Knijpen begint: lopende tekening of veeg annuleren.
-      if (drawing && !drawing.done && !drawing.erase) {
-        // Net begonnen streek weghalen: het was een knijpgebaar.
-        drawing.items.splice(drawing.items.indexOf(drawing.it), 1);
-        redrawInk(drawing.el, drawing.items);
-      }
-      drawing = null;
-      start = null;
-      const [a, b] = [...pts.values()];
-      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, scale: 1 };
+      if (g && g.type === "draw") abortDraw(g.d);
+      lastTap && clearTimeout(lastTap.timer);
+      lastTap = null;
+      startPinch();
       return;
     }
     if (pts.size > 2) return;
@@ -600,108 +807,121 @@ function attachGestures(stage) {
     const drawTool = st.tool && st.tool !== "link";
     const touchPans = st.penSeen && e.pointerType === "touch";
     if (drawTool && !touchPans) {
-      drawing = beginDraw(e);
-      if (drawing) return;
+      const d = beginDraw(e);
+      if (d) {
+        g = { type: "draw", d };
+        return;
+      }
     }
-    start = { x: e.clientX, y: e.clientY, t: performance.now(), sl: stage.scrollLeft, st: stage.scrollTop, type: e.pointerType };
-    pan = { x: e.clientX, y: e.clientY, t: performance.now() };
-    vel = { x: 0, y: 0 };
+    startPan(p, e);
   });
 
   stage.addEventListener("pointermove", (e) => {
     if (!pts.has(e.pointerId)) return;
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pinch && pts.size === 2) {
+    const p = local(e);
+    pts.set(e.pointerId, p);
+    if (!g) return;
+
+    if (g.type === "pinch" && pts.size >= 2) {
       const [a, b] = [...pts.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      pinch.scale = Math.max(1 / st.zoom, Math.min(4 / st.zoom, d / pinch.d));
-      const w = $("#v-pages");
-      const r = stage.getBoundingClientRect();
-      w.style.transformOrigin = `${pinch.cx - r.left + stage.scrollLeft}px ${pinch.cy - r.top + stage.scrollTop}px`;
-      w.style.transform = `scale(${pinch.scale})`;
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const z = Math.max(1, Math.min(MAX_ZOOM, (g.cam0.z * d) / g.d0));
+      // Het punt dat onder de vingers lag, blijft onder de vingers (ook bij schuiven).
+      const px = (g.m0.x - g.cam0.x) / g.cam0.z;
+      const py = (g.m0.y - g.cam0.y) / g.cam0.z;
+      cam.z = z;
+      cam.x = m.x - px * z;
+      cam.y = m.y - py * z;
+      clampCam();
+      applyCam();
       return;
     }
-    if (drawing) return moveDraw(drawing, e);
-    if (!start) return;
-    // Slepen: schuiven als de inhoud groter is dan het scherm.
-    const canScroll = stage.scrollHeight > stage.clientHeight + 2 || stage.scrollWidth > stage.clientWidth + 2;
-    if (canScroll) {
-      const now = performance.now();
-      const dt = Math.max(1, now - pan.t);
-      vel = { x: (pan.x - e.clientX) / dt, y: (pan.y - e.clientY) / dt };
-      pan = { x: e.clientX, y: e.clientY, t: now };
-      stage.scrollLeft = start.sl - (e.clientX - start.x);
-      stage.scrollTop = start.st - (e.clientY - start.y);
+    if (g.type === "draw") return moveDraw(g.d, e);
+    if (g.type === "pending" || g.type === "pan") {
+      const dx = p.x - g.x0;
+      const dy = p.y - g.y0;
+      if (g.type === "pending" && Math.hypot(dx, dy) > 8) g.type = canPan() ? "pan" : "swipe";
+      if (g.type === "pan") {
+        const now = performance.now();
+        const dt = Math.max(1, now - g.lt);
+        g.vx = (p.x - g.lx) / dt;
+        g.vy = (p.y - g.ly) / dt;
+        g.lx = p.x;
+        g.ly = p.y;
+        g.lt = now;
+        cam.x = g.cam0.x + dx;
+        cam.y = g.cam0.y + dy;
+        clampCam();
+        applyCam();
+      }
     }
   });
 
   const end = (e) => {
     if (!pts.has(e.pointerId)) return;
+    const p = local(e);
     pts.delete(e.pointerId);
-    if (pinch) {
+    if (!g) return;
+
+    if (g.type === "pinch") {
+      if (pts.size === 1) {
+        // Eén vinger blijft staan: verder schuiven met die vinger.
+        const [q] = [...pts.values()];
+        startPan(q, e);
+        g.type = "pan";
+        return;
+      }
       if (pts.size === 0) {
-        const s = pinch.scale;
-        const w = $("#v-pages");
-        w.style.transform = "";
-        const r = stage.getBoundingClientRect();
-        const fx = pinch.cx - r.left + stage.scrollLeft;
-        const fy = pinch.cy - r.top + stage.scrollTop;
-        setZoom(st.zoom * s, { fx, fy, cx: pinch.cx - r.left, cy: pinch.cy - r.top, s });
-        pinch = null;
+        g = null;
+        if (cam.z < 1.08) animateCam({ x: 0, y: cam.y, z: 1 }, 180, sharpenSoon);
+        else sharpenSoon();
       }
       return;
     }
-    if (drawing) {
-      endDraw(drawing);
-      drawing = null;
+    if (g.type === "draw") {
+      endDraw(g.d);
+      g = null;
       return;
     }
-    if (!start || e.type === "pointercancel") {
-      start = null;
-      return;
-    }
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-    const dt = performance.now() - start.t;
-    const s0 = start;
-    start = null;
-    const moved = Math.hypot(dx, dy);
-    const canScroll = stage.scrollHeight > stage.clientHeight + 2 || stage.scrollWidth > stage.clientWidth + 2;
+    const cur = g;
+    g = null;
+    if (e.type === "pointercancel") return;
+    const dx = p.x - cur.x0;
+    const dy = p.y - cur.y0;
+    const dt = performance.now() - cur.t0;
 
-    // Vegen links/rechts = omslaan (niet in scroll-stand en niet ingezoomd).
-    if (S().swipe && moved > 50 && Math.abs(dx) > Math.abs(dy) * 1.4 && dt < 600 && !canScroll && root().dataset.mode !== "scroll") {
-      dx < 0 ? next() : prev();
+    if (cur.type === "pan") return glide(cur.vx, cur.vy);
+    if (cur.type === "swipe") {
+      if (S().swipe && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4 && dt < 700) dx < 0 ? next() : prev();
       return;
     }
-    if (moved > 12) {
-      if (canScroll) glide();
-      return;
-    }
-    handleTap(e, s0);
+    if (dt < 500) handleTap(p, e);
   };
   stage.addEventListener("pointerup", end);
   stage.addEventListener("pointercancel", end);
 
-  function glide() {
-    let { x, y } = vel;
+  function glide(vx, vy) {
     let last = performance.now();
     const frame = (now) => {
       const dt = now - last;
       last = now;
-      stage.scrollLeft += x * dt;
-      stage.scrollTop += y * dt;
-      x *= Math.pow(0.95, dt / 16);
-      y *= Math.pow(0.95, dt / 16);
-      if (Math.abs(x) + Math.abs(y) > 0.02) inertia = requestAnimationFrame(frame);
+      cam.x += vx * dt;
+      cam.y += vy * dt;
+      clampCam();
+      applyCam();
+      vx *= Math.pow(0.94, dt / 16);
+      vy *= Math.pow(0.94, dt / 16);
+      if (Math.abs(vx) + Math.abs(vy) > 0.02) inertia = requestAnimationFrame(frame);
     };
-    if (Math.abs(x) + Math.abs(y) > 0.1) inertia = requestAnimationFrame(frame);
+    if (Math.abs(vx) + Math.abs(vy) > 0.1) inertia = requestAnimationFrame(frame);
   }
 
-  function handleTap(e, s0) {
-    const r = stage.getBoundingClientRect();
-    const fx = (e.clientX - r.left) / r.width;
+  function handleTap(p, e) {
+    const { W } = stageSize();
+    const fx = p.x / W;
     if (st.tool === "link") return placeLink(e);
-    if (st.tool) return; // tekenstand: tikken doet niets extra
+    if (st.tool) return;
 
     const zoneW = 0.3;
     if (S().tapZones && fx > 1 - zoneW) {
@@ -714,13 +934,11 @@ function attachGestures(stage) {
     }
     // Midden: enkel = knoppen tonen/verbergen, dubbel = zoomen.
     const now = performance.now();
-    if (lastTap && now - lastTap.t < 300 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
+    if (lastTap && now - lastTap.t < 300 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 40) {
       clearTimeout(lastTap.timer);
       lastTap = null;
-      const fxp = e.clientX - r.left + stage.scrollLeft;
-      const fyp = e.clientY - r.top + stage.scrollTop;
-      const target = st.zoom > 1.01 ? 1 : 2;
-      setZoom(target, { fx: fxp, fy: fyp, cx: e.clientX - r.left, cy: e.clientY - r.top, s: target / st.zoom });
+      if (cam.z > 1.01) animateCam({ x: 0, y: 0, z: 1 }, 220, sharpenSoon);
+      else zoomAt(2.2, p.x, p.y);
       return;
     }
     const timer = setTimeout(() => {
@@ -728,43 +946,36 @@ function attachGestures(stage) {
       if (panelOpen()) closePanels();
       else showChrome(!chromeVisible());
     }, 260);
-    lastTap = { t: now, x: e.clientX, y: e.clientY, timer };
+    lastTap = { t: now, x: p.x, y: p.y, timer };
   }
 
+  let wheelAcc = 0;
+  let wheelTimer = 0;
   stage.addEventListener(
     "wheel",
     (e) => {
-      if (!e.ctrlKey) return;
       e.preventDefault();
-      const r = stage.getBoundingClientRect();
-      const s = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      setZoom(st.zoom * s, { fx: e.clientX - r.left + stage.scrollLeft, fy: e.clientY - r.top + stage.scrollTop, cx: e.clientX - r.left, cy: e.clientY - r.top, s });
+      const p = local(e);
+      if (e.ctrlKey) return zoomAt(cam.z * Math.exp(-e.deltaY / 300), p.x, p.y, false);
+      if (canPan()) {
+        stopCamAnim();
+        cam.x -= e.deltaX;
+        cam.y -= e.deltaY;
+        clampCam();
+        applyCam();
+        return;
+      }
+      // Muiswiel zonder zoom: omslaan.
+      wheelAcc += e.deltaY;
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => (wheelAcc = 0), 300);
+      if (Math.abs(wheelAcc) > 120) {
+        wheelAcc > 0 ? next() : prev();
+        wheelAcc = -Math.sign(wheelAcc) * 1000; // één keer per zwiep
+      }
     },
     { passive: false }
   );
-}
-
-function setZoom(z, focus) {
-  const nz = Math.max(1, Math.min(4, z));
-  if (Math.abs(nz - st.zoom) < 0.01) {
-    render();
-    return;
-  }
-  const real = nz / st.zoom;
-  st.zoom = nz;
-  if (focus) {
-    const stage = $("#v-stage");
-    // Houd het punt onder de vingers op dezelfde plek.
-    const pagesRect = $("#v-pages").getBoundingClientRect();
-    const sr = stage.getBoundingClientRect();
-    const offX = pagesRect.left - sr.left + stage.scrollLeft;
-    const offY = pagesRect.top - sr.top + stage.scrollTop;
-    zoomScrollTarget = {
-      x: Math.max(0, (focus.fx - offX) * real - focus.cx),
-      y: Math.max(0, (focus.fy - offY) * real - focus.cy),
-    };
-  }
-  render();
 }
 
 // ---------- toetsen / pedaal ----------
@@ -784,8 +995,9 @@ document.addEventListener("keydown", (e) => {
     else closeViewer();
     e.preventDefault();
     return;
-  } else if (e.key === "+" || e.key === "=") return setZoom(st.zoom * 1.25);
-  else if (e.key === "-") return setZoom(st.zoom / 1.25);
+  } else if (e.key === "+" || e.key === "=") return zoomCenter(1.25);
+  else if (e.key === "-") return zoomCenter(1 / 1.25);
+  else if ((e.ctrlKey || e.metaKey) && e.key === "z") return undo();
   if (!dir) return;
   e.preventDefault();
   if (S().pedalSwap) dir = -dir;
@@ -796,6 +1008,7 @@ document.addEventListener("keydown", (e) => {
 
 function setTool(t) {
   st.tool = t;
+  if (t !== "text") selectStamp(null);
   root().classList.toggle("drawing", !!t);
   const bar = $("#v-tools");
   if (!bar) return;
@@ -805,57 +1018,178 @@ function setTool(t) {
     renderToolbar();
     if (!S().showNotes) {
       setSetting("showNotes", true);
-      render();
+      document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk);
     }
   }
+}
+
+function currentStamp() {
+  return st.stamp || STAMP_GROUPS[0].items[4]; // mf
 }
 
 function renderToolbar() {
   const bar = $("#v-tools");
   const tb = (name, ic, label) =>
-    h("button", { type: "button", class: "tbtn" + (st.tool === name ? " active" : ""), title: label, "aria-label": label, onclick: () => { st.tool = name; renderToolbar(); if (name === "text") pickStamp(); }, html: icon(ic) });
+    h("button", {
+      type: "button",
+      class: "tbtn" + (st.tool === name ? " active" : ""),
+      title: label,
+      "aria-label": label,
+      onclick: () => {
+        if (name !== "text") selectStamp(null);
+        st.tool = name;
+        renderToolbar();
+        if (name === "text" && !st.stamp) pickStamp();
+      },
+      html: icon(ic),
+    });
   const colors = h(
     "div",
     { class: "tcolors" },
     COLORS.map((c) =>
-      h("button", { type: "button", class: "tcolor" + (S().penColor === c ? " active" : ""), style: `--c:${c}`, "aria-label": "Kleur", onclick: () => { setSetting("penColor", c); renderToolbar(); } })
+      h("button", {
+        type: "button",
+        class: "tcolor" + (S().penColor === c ? " active" : ""),
+        style: `--c:${c}`,
+        "aria-label": "Kleur",
+        onclick: () => {
+          setSetting("penColor", c);
+          if (st.selected) {
+            st.selected.item.c = c;
+            saveSelected();
+          }
+          renderToolbar();
+        },
+      })
     )
   );
-  const widths = h(
-    "div",
-    { class: "twidths" },
-    [2, 3, 6].map((w) =>
-      h("button", { type: "button", class: "twidth" + (S().penWidth === w ? " active" : ""), "aria-label": "Dikte", onclick: () => { setSetting("penWidth", w); renderToolbar(); } }, h("i", { style: `height:${w + 1}px` }))
-    )
-  );
-  fill(bar, 
+  const extra = [];
+  if (st.tool === "text") {
+    const s = currentStamp();
+    extra.push(
+      h("span", { class: "tsep" }),
+      h("button", { type: "button", class: "tstamp-btn f-" + s.f, title: "Teken kiezen", onclick: pickStamp }, s.v),
+      h("button", { type: "button", class: "tbtn", "aria-label": "Kleiner", title: "Kleiner", onclick: () => resizeStamp(-1) }, h("span", { class: "tsize small" }, "A")),
+      h("button", { type: "button", class: "tbtn", "aria-label": "Groter", title: "Groter", onclick: () => resizeStamp(1) }, h("span", { class: "tsize" }, "A"))
+    );
+    if (st.selected) extra.push(h("button", { type: "button", class: "tbtn", "aria-label": "Teken weghalen", title: "Teken weghalen", onclick: deleteSelected, html: icon("close") }));
+  } else if (st.tool === "pen" || st.tool === "marker") {
+    extra.push(
+      h(
+        "div",
+        { class: "twidths" },
+        [2, 3, 6].map((w) =>
+          h("button", { type: "button", class: "twidth" + (S().penWidth === w ? " active" : ""), "aria-label": "Dikte", onclick: () => { setSetting("penWidth", w); renderToolbar(); } }, h("i", { style: `height:${w + 1}px` }))
+        )
+      )
+    );
+  }
+  fill(
+    bar,
     tb("pen", "pen", "Pen"),
     tb("marker", "marker", "Markeerstift"),
-    tb("text", "stamp", "Teken/tekst"),
+    tb("text", "stamp", "Tekens en tekst"),
     tb("eraser", "eraser", "Gum"),
     tb("link", "link", "Sprong maken"),
     h("span", { class: "tsep" }),
     colors,
-    widths,
+    ...extra,
     h("span", { class: "tsep" }),
     h("button", { type: "button", class: "tbtn", title: "Ongedaan maken", "aria-label": "Ongedaan maken", onclick: undo, html: icon("undo") }),
     h("button", { type: "button", class: "tbtn", title: "Pagina wissen", "aria-label": "Pagina wissen", onclick: clearPage, html: icon("trash") }),
-    h("button", { type: "button", class: "tbtn done", onclick: () => setTool(null), html: icon("check") + "<span>Klaar</span>" })
+    h("button", { type: "button", class: "tbtn done", onclick: () => setTool(null), html: icon("check") + "<span>Klaar</span>" }),
+    st.tool === "link" ? h("span", { class: "thint" }, "Tik waar de sprong moet komen") : null
   );
-  if (st.tool === "text") bar.append(h("span", { class: "tstamp" }, st.stamp));
-  if (st.tool === "link") bar.append(h("span", { class: "thint" }, "Tik waar de sprong moet komen"));
 }
 
+// Kiezer met alle tekens als symbolen, per groep.
 async function pickStamp() {
-  const v = await menu(
-    "Kies een teken",
-    [...STAMPS.map((s) => ({ label: s, value: s })), { label: "Eigen tekst…", value: "__own" }]
+  let chosen = null;
+  const grid = h(
+    "div",
+    { class: "stamp-picker" },
+    STAMP_GROUPS.map((g) =>
+      h(
+        "section",
+        {},
+        h("h3", {}, g.name),
+        h(
+          "div",
+          { class: "stamp-grid" },
+          g.items.map((it) =>
+            h(
+              "button",
+              {
+                type: "button",
+                class: "stamp-opt" + (st.stamp && st.stamp.v === it.v ? " on" : ""),
+                title: it.label,
+                "aria-label": it.label,
+                onclick: () => {
+                  chosen = it;
+                  dialog.close && dialog.close(true);
+                },
+              },
+              h("span", { class: "glyph f-" + it.f }, it.v)
+            )
+          )
+        )
+      )
+    )
   );
-  if (v === "__own") {
-    const t = await promptDlg("Tekst", "", { placeholder: "bijv. Solo, 2x, adem" });
-    if (t) st.stamp = t;
-  } else if (v) st.stamp = v;
+  const own = await dialog({ title: "Kies een teken", content: grid, buttons: [{ label: "Eigen tekst…", value: "own" }, { label: "Sluiten", value: false }] });
+  if (own === "own") {
+    const t = await promptDlg("Eigen tekst", "", { placeholder: "bijv. Solo, 2x, adem, Jan" });
+    if (t) chosen = { label: t, v: t, f: "t" };
+  }
+  if (chosen) {
+    st.stamp = chosen;
+    st.tool = "text";
+    selectStamp(null);
+  }
   renderToolbar();
+}
+
+function stampSize() {
+  const i = Math.max(0, Math.min(STAMP_SIZES.length - 1, S().stampSize ?? 2));
+  return STAMP_SIZES[i];
+}
+
+function resizeStamp(dir) {
+  if (st.selected) {
+    const it = st.selected.item;
+    const before = st.ink.get(st.selected.page).map((x) => ({ ...x }));
+    it.s = Math.max(0.01, Math.min(0.2, it.s * (dir > 0 ? 1.25 : 0.8)));
+    st.undo.push({ page: st.selected.page, before });
+    saveSelected();
+  } else {
+    setSetting("stampSize", Math.max(0, Math.min(STAMP_SIZES.length - 1, (S().stampSize ?? 2) + dir)));
+    toast(["Heel klein", "Klein", "Normaal", "Groot", "Heel groot"][S().stampSize], 900);
+  }
+}
+
+function selectStamp(sel) {
+  const prevPage = st.selected && st.selected.page;
+  st.selected = sel;
+  if (prevPage) refreshInk(prevPage);
+  if (sel) refreshInk(sel.page);
+  if ($("#v-tools") && !$("#v-tools").hidden) renderToolbar();
+}
+
+function saveSelected() {
+  if (!st.selected) return;
+  const p = st.selected.page;
+  saveInk(st.song.id, p, st.ink.get(p));
+  refreshInk(p);
+}
+
+function deleteSelected() {
+  if (!st.selected) return;
+  const { page, item } = st.selected;
+  const items = st.ink.get(page);
+  st.undo.push({ page, before: items.slice() });
+  items.splice(items.indexOf(item), 1);
+  saveInk(st.song.id, page, items);
+  selectStamp(null);
 }
 
 function pageAt(e) {
@@ -865,33 +1199,40 @@ function pageAt(e) {
   const box = el._box;
   const fx = (e.clientX - r.left) / r.width;
   const fy = (e.clientY - r.top) / r.height;
-  return { el, page: +el.dataset.page, x: box.x + fx * box.w, y: box.y + fy * box.h, rect: r };
+  return { el, page: el._p, x: box.x + fx * box.w, y: box.y + fy * box.h, rect: r };
 }
 
 function beginDraw(e) {
   const hit = pageAt(e);
   if (!hit) return null;
-  const items = st.ink.get(hit.page) || [];
-  st.ink.set(hit.page, items);
-  const pageW = hit.rect.width / hit.el._box.w; // css-breedte van hele pagina
+  if (!st.ink.has(hit.page)) st.ink.set(hit.page, []);
+  const items = st.ink.get(hit.page);
+  const pageW = hit.rect.width / hit.el._box.w; // schermbreedte van de hele pagina
+  const before = items.map((x) => ({ ...x }));
+
   if (st.tool === "text") {
-    const it = { t: "text", c: S().penColor, s: 22 / pageW, x: hit.x, y: hit.y, v: st.stamp, b: DYNAMICS.has(st.stamp) };
-    items.push(it);
-    st.undo.push({ page: hit.page, before: items.slice(0, -1) });
-    redrawInk(hit.el, items);
-    saveInk(st.song.id, hit.page, items);
-    return { done: true, page: hit.page };
+    // Bestaand teken aangeraakt: selecteren en verslepen. Anders: nieuw teken.
+    const i = hitTest(items.filter((x) => x.t === "text"), hit.x, hit.y, 16 / pageW, hit.el._aspect);
+    const texts = items.filter((x) => x.t === "text");
+    let item;
+    if (i >= 0) item = texts[i];
+    else {
+      const s = currentStamp();
+      item = { t: "text", c: S().penColor, s: stampSize(), x: hit.x, y: hit.y, v: s.v, f: s.f };
+      items.push(item);
+    }
+    selectStamp({ page: hit.page, item });
+    return { stamp: true, page: hit.page, el: hit.el, item, items, before, dx: item.x - hit.x, dy: item.y - hit.y, moved: i < 0 };
   }
   if (st.tool === "eraser") {
-    const d = { erase: true, page: hit.page, el: hit.el, items, before: items.slice(), pageW };
+    const d = { erase: true, page: hit.page, el: hit.el, items, before, pageW };
     eraseAt(d, hit);
     return d;
   }
   const w = (st.tool === "marker" ? S().penWidth * 5 : S().penWidth) / pageW;
   const it = { t: st.tool, c: st.tool === "marker" ? markerColor(S().penColor) : S().penColor, w, p: [hit.x, hit.y] };
-  const before = items.slice();
   items.push(it);
-  redrawInk(hit.el, items);
+  refreshInk(hit.page);
   return { page: hit.page, el: hit.el, it, items, before };
 }
 
@@ -899,58 +1240,78 @@ function markerColor(c) {
   return c === "#111111" ? "#fde047" : c;
 }
 
+function toPage(d, ev) {
+  const r = d.el._ink.getBoundingClientRect();
+  const box = d.el._box;
+  return { x: box.x + ((ev.clientX - r.left) / r.width) * box.w, y: box.y + ((ev.clientY - r.top) / r.height) * box.h };
+}
+
 function moveDraw(d, e) {
-  if (d.done) return;
+  if (d.stamp) {
+    const q = toPage(d, e);
+    d.item.x = +(q.x + d.dx).toFixed(4);
+    d.item.y = +(q.y + d.dy).toFixed(4);
+    d.moved = true;
+    refreshInk(d.page);
+    return;
+  }
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   for (const ev of events) {
-    const r = d.el._ink.getBoundingClientRect();
-    const box = d.el._box;
-    const x = box.x + ((ev.clientX - r.left) / r.width) * box.w;
-    const y = box.y + ((ev.clientY - r.top) / r.height) * box.h;
-    if (d.erase) eraseAt(d, { x, y });
-    else d.it.p.push(+x.toFixed(4), +y.toFixed(4));
+    const q = toPage(d, ev);
+    if (d.erase) eraseAt(d, q);
+    else d.it.p.push(+q.x.toFixed(4), +q.y.toFixed(4));
   }
-  if (!d.erase) redrawInk(d.el, d.items);
+  if (!d.erase) refreshInk(d.page);
 }
 
 function eraseAt(d, pt) {
   const i = hitTest(d.items, pt.x, pt.y, 14 / d.pageW, d.el._aspect);
   if (i >= 0) {
     d.items.splice(i, 1);
-    redrawInk(d.el, d.items);
+    refreshInk(d.page);
   }
 }
 
 function endDraw(d) {
-  if (d.done) return;
+  if (d.stamp && !d.moved) return;
   if (d.erase && d.items.length === d.before.length) return;
   st.undo.push({ page: d.page, before: d.before });
   saveInk(st.song.id, d.page, d.items);
+  if (d.stamp) renderToolbar();
 }
 
-function redrawInk(el, items) {
-  const c = el._ink;
-  drawInk(c.getContext("2d"), items, el._box, c.width, c.height);
-  // Cache van halve pagina's e.d. blijft geldig: krabbels zitten los op de laag.
+// Tweede vinger kwam erbij: het was knijpen, geen tekenen.
+function abortDraw(d) {
+  if (d.stamp || d.erase) {
+    st.ink.set(d.page, d.before);
+    if (d.stamp) selectStamp(null);
+  } else {
+    d.items.splice(d.items.indexOf(d.it), 1);
+  }
+  refreshInk(d.page);
 }
 
 async function undo() {
   const u = st.undo.pop();
   if (!u) return toast("Niets om ongedaan te maken");
   st.ink.set(u.page, u.before);
+  selectStamp(null);
   await saveInk(st.song.id, u.page, u.before);
-  render();
+  refreshInk(u.page);
 }
 
 async function clearPage() {
-  const p = st.page;
-  const items = st.ink.get(p) || [];
-  if (!items.length) return toast("Geen krabbels op deze pagina");
-  if (!(await confirmDlg("Krabbels wissen?", `Alle krabbels op pagina ${p} verdwijnen.`, "Wissen", true))) return;
-  st.undo.push({ page: p, before: items.slice() });
-  st.ink.set(p, []);
-  await saveInk(st.song.id, p, []);
-  render();
+  const pages = [...new Set([...document.querySelectorAll("#v-pages .v-page")].map((el) => el._p))].filter((p) => (st.ink.get(p) || []).length);
+  if (!pages.length) return toast("Geen krabbels op deze pagina");
+  const label = pages.length > 1 ? `pagina ${pages.join(" en ")}` : `pagina ${pages[0]}`;
+  if (!(await confirmDlg("Krabbels wissen?", `Alle krabbels op ${label} verdwijnen.`, "Wissen", true))) return;
+  selectStamp(null);
+  for (const p of pages) {
+    st.undo.push({ page: p, before: st.ink.get(p).slice() });
+    st.ink.set(p, []);
+    await saveInk(st.song.id, p, []);
+    refreshInk(p);
+  }
 }
 
 // ---------- sprongen (herhalingen, D.S., coda) ----------
@@ -966,7 +1327,7 @@ async function placeLink(e) {
   await saveSong(st.song);
   setTool(null);
   toast("Sprong gemaakt. Tik erop om te springen.");
-  render();
+  refreshPage(hit.page);
 }
 
 async function onLinkTap(i) {
@@ -976,7 +1337,7 @@ async function onLinkTap(i) {
     if (await confirmDlg("Sprong verwijderen?", "", "Verwijderen", true)) {
       st.song.links.splice(i, 1);
       await saveSong(st.song);
-      render();
+      refreshPage(ln.page);
     }
     return;
   }
@@ -1221,30 +1582,28 @@ function startAutoScroll() {
   pill.hidden = false;
   let paused = false;
   const draw = () => {
-    fill(pill, 
-      h("button", { type: "button", class: "vbtn", onclick: () => { paused = !paused; draw(); }, html: icon(paused ? "play" : "pause") }),
-      h("button", { type: "button", class: "vbtn", onclick: () => { setSetting("scrollSpeed", Math.max(5, S().scrollSpeed - 5)); draw(); } }, "−"),
+    fill(
+      pill,
+      h("button", { type: "button", class: "vbtn", "aria-label": paused ? "Verder" : "Pauze", onclick: () => { paused = !paused; draw(); }, html: icon(paused ? "play" : "pause") }),
+      h("button", { type: "button", class: "vbtn", "aria-label": "Langzamer", onclick: () => { setSetting("scrollSpeed", Math.max(5, S().scrollSpeed - 5)); draw(); } }, "−"),
       h("span", {}, S().scrollSpeed),
-      h("button", { type: "button", class: "vbtn", onclick: () => { setSetting("scrollSpeed", Math.min(200, S().scrollSpeed + 5)); draw(); } }, "+"),
-      h("button", { type: "button", class: "vbtn", onclick: stopAutoScroll, html: icon("close") })
+      h("button", { type: "button", class: "vbtn", "aria-label": "Sneller", onclick: () => { setSetting("scrollSpeed", Math.min(200, S().scrollSpeed + 5)); draw(); } }, "+"),
+      h("button", { type: "button", class: "vbtn", "aria-label": "Stoppen", onclick: stopAutoScroll, html: icon("close") })
     );
   };
   draw();
   const go = () => {
-    const stage = $("#v-stage");
     let last = performance.now();
-    let acc = 0;
     const frame = (now) => {
       if (!st.autoScroll) return;
       const dt = (now - last) / 1000;
       last = now;
-      if (!paused) {
-        acc += S().scrollSpeed * dt;
-        if (acc >= 1) {
-          stage.scrollTop += Math.floor(acc);
-          acc -= Math.floor(acc);
-        }
-        if (stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 2 && st.list && st.listIndex < st.list.songIds.length - 1) {
+      if (!paused && !camAnim) {
+        const { H } = stageSize();
+        const minY = H - contentSize().h * cam.z;
+        cam.y = Math.max(minY, cam.y - S().scrollSpeed * dt);
+        applyCam();
+        if (cam.y <= minY + 1) {
           paused = true;
           draw();
         }
@@ -1273,8 +1632,10 @@ async function moreMenu() {
   const v = await menu(st.song.title, [
     { label: "Eén pagina", value: "single", icon: icon("single"), active: mode === "single" },
     { label: "Twee pagina's naast elkaar", value: "double", icon: icon("double"), active: mode === "double" },
+    { label: "Automatisch (liggend = twee)", value: "auto", icon: icon("expand"), active: mode === "auto" },
     { label: "Doorlopend scrollen", value: "scroll", icon: icon("vertical"), active: mode === "scroll" },
     { label: "Halve pagina omslaan", value: "half", icon: icon("half"), active: S().halfTurn },
+    S().halfTurn ? { label: S().halfOrder === "nextTop" ? "Halve pagina: volgende boven" : "Halve pagina: huidige boven", value: "halforder", icon: icon("repeat") } : null,
     { label: "Witte randen wegsnijden", value: "crop", icon: icon("crop"), active: S().autoCrop },
     { label: "Nachtstand (wit op zwart)", value: "night", icon: icon("moon"), active: S().nightSheet },
     { label: "Krabbels tonen", value: "notes", icon: icon("pen"), active: S().showNotes },
@@ -1283,20 +1644,26 @@ async function moreMenu() {
     { label: "Naar pagina…", value: "goto", icon: icon("right") },
     { label: "Volledig scherm", value: "fs", icon: icon("expand") },
     { label: "Gegevens bewerken", value: "edit", icon: icon("edit") },
-  ]);
+  ].filter(Boolean));
   if (!v) return;
-  if (["single", "double", "scroll"].includes(v)) {
+  if (["single", "double", "auto", "scroll"].includes(v)) {
     setSetting("viewMode", v);
-    st.zoom = 1;
+    cam.z = 1;
     st.half = false;
-  } else if (v === "half") setSetting("halfTurn", !S().halfTurn);
+  } else if (v === "half") {
+    setSetting("halfTurn", !S().halfTurn);
+    st.half = false;
+  } else if (v === "halforder") setSetting("halfOrder", S().halfOrder === "nextTop" ? "curTop" : "nextTop");
   else if (v === "crop") {
     setSetting("autoCrop", !S().autoCrop);
     st.cache.clear();
   } else if (v === "night") setSetting("nightSheet", !S().nightSheet);
-  else if (v === "notes") setSetting("showNotes", !S().showNotes);
-  else if (v === "zin") return setZoom(st.zoom * 1.25);
-  else if (v === "zout") return setZoom(st.zoom / 1.25);
+  else if (v === "notes") {
+    setSetting("showNotes", !S().showNotes);
+    document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk);
+    return;
+  } else if (v === "zin") return zoomCenter(1.25);
+  else if (v === "zout") return zoomCenter(1 / 1.25);
   else if (v === "goto") {
     const n = await promptDlg(`Naar pagina (1-${st.pages})`, "", { type: "number" });
     if (n) goto(parseInt(n, 10));

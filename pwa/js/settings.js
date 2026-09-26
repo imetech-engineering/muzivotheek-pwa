@@ -7,8 +7,7 @@ export const DEFAULTS = {
   sort: "title", // title | composer | added | opened | played
   sortDesc: false,
   libView: "list", // list | grid
-  viewMode: "single", // single | double | scroll
-  autoDouble: true, // liggend: automatisch twee pagina's
+  viewMode: "single", // single | double | auto (liggend = twee) | scroll
   autoCrop: true, // witte marges wegsnijden
   nightSheet: false, // bladmuziek inverteren (wit op zwart)
   fullscreen: true,
@@ -17,7 +16,9 @@ export const DEFAULTS = {
   swipe: true,
   tapLeftPrev: true,
   pedalSwap: false,
-  halfTurn: false, // eerst onderste helft van de volgende pagina tonen
+  halfTurn: false, // eerst een halve pagina omslaan
+  halfOrder: "curTop", // curTop: boven = rest van deze pagina, onder = begin volgende | nextTop: andersom
+  stampSize: 2, // index in STAMP_SIZES
   showNotes: true,
   penColor: "#e11d48",
   penWidth: 3,

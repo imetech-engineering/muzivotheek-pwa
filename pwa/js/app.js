@@ -11,6 +11,7 @@ import { Metronome, tempoName } from "./metronome.js";
 import { Tuner } from "./tuner.js";
 import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, fmtDate } from "./ui.js";
 import { icon } from "./icons.js";
+import { canLinkFolder, canPickFolderOnce, linkFolder, unlinkFolder, folderSources, syncFolder, syncAllFolders, regrantAndSync, pickFolderOnce } from "./folders.js";
 import { initUpdates, check as checkUpdate, applyUpdate, BUILD } from "./update.js";
 
 const VERSION = "1.0.0";
@@ -21,6 +22,7 @@ const state = {
   q: "",
   filter: "", // "" | "★" | map-naam
   openList: null, // id van geopende afspeellijst
+  needPermission: [], // gekoppelde mappen die opnieuw toestemming nodig hebben
 };
 
 // ---------- tabs ----------
@@ -121,7 +123,19 @@ async function renderSongs() {
   );
 
   const listEl = h("div", { id: "song-list" });
-  fill(tab, h("div", { class: "search-row" }, h("span", { class: "search-ic", html: icon("search") }), search), tools, fl.length || all.some((s) => s.favorite) ? chips : null, listEl);
+  const folderBar = state.needPermission.length
+    ? h("button", {
+        type: "button",
+        class: "sync-bar",
+        onclick: async () => {
+          const srcs = state.needPermission;
+          state.needPermission = [];
+          await runFolderSync(() => regrantAndSync(srcs, progressText), "Mappen bijgewerkt");
+        },
+        html: icon("folder") + `<span>Tik om ${state.needPermission.length > 1 ? "je gekoppelde mappen" : `map "${state.needPermission[0].name}"`} bij te werken</span>`,
+      })
+    : null;
+  fill(tab, folderBar, h("div", { class: "search-row" }, h("span", { class: "search-ic", html: icon("search") }), search), tools, fl.length || all.some((s) => s.favorite) ? chips : null, listEl);
 
   function chip(label, val) {
     return h("button", { type: "button", class: "chip" + (state.filter === val ? " on" : ""), onclick: () => { state.filter = val; renderSongs(); } }, label);
@@ -142,7 +156,10 @@ async function renderSongs() {
           h("div", { class: "empty-ic", html: icon("music") }),
           h("h2", {}, "Nog geen bladmuziek"),
           h("p", {}, "Voeg PDF's toe vanaf je apparaat."),
-          h("button", { type: "button", class: "btn primary big", onclick: pickFiles, html: icon("plus") + "<span>PDF's toevoegen</span>" })
+          h("button", { type: "button", class: "btn primary big", onclick: pickFiles, html: icon("plus") + "<span>PDF's toevoegen</span>" }),
+          canLinkFolder() || canPickFolderOnce()
+            ? h("div", {}, h("button", { type: "button", class: "btn big second", onclick: addMenu, html: icon("folder") + "<span>Of een hele map</span>" }))
+            : null
         )
       );
       return;
@@ -374,6 +391,47 @@ document.addEventListener("edit-song", (e) => editSong(e.detail.id, e.detail.onS
 
 // ---------- importeren ----------
 
+// Plus-knop: kiezen hoe je nummers toevoegt.
+async function addMenu() {
+  const items = [{ label: "PDF's kiezen", value: "files", icon: icon("upload") }];
+  if (canLinkFolder()) items.push({ label: "Map koppelen (blijft bijgewerkt)", value: "link", icon: icon("folder") });
+  else if (canPickFolderOnce()) items.push({ label: "Hele map toevoegen", value: "once", icon: icon("folder") });
+  if (items.length === 1) return pickFiles();
+  const v = await menu("Nummers toevoegen", items);
+  if (v === "files") pickFiles();
+  if (v === "once") importFiles(await pickFolderOnce());
+  if (v === "link") {
+    try {
+      const src = await linkFolder();
+      await runFolderSync(() => syncFolder(src, progressText), `Map "${src.name}" gekoppeld`);
+    } catch (e) {
+      if (e.name !== "AbortError") toast("Map koppelen mislukt");
+    }
+  }
+}
+
+function progressText(t) {
+  const prog = $("#progress");
+  prog.hidden = false;
+  prog.querySelector("span").textContent = t;
+  prog.querySelector("i").style.width = "60%";
+}
+
+async function runFolderSync(fn, doneLabel = "") {
+  try {
+    const r = await fn();
+    const bits = [];
+    if (r.added) bits.push(`${r.added} nieuw`);
+    if (r.updated) bits.push(`${r.updated} bijgewerkt`);
+    if (doneLabel || bits.length) toast([doneLabel, bits.join(", ")].filter(Boolean).join(": ") || "Alles is al bij", 3000);
+    persistStorage();
+    return r;
+  } finally {
+    $("#progress").hidden = true;
+    document.dispatchEvent(new CustomEvent("library"));
+  }
+}
+
 function pickFiles() {
   const input = h("input", { type: "file", accept: "application/pdf,.pdf", multiple: true, hidden: true });
   input.onchange = () => importFiles([...input.files]);
@@ -382,11 +440,14 @@ function pickFiles() {
   setTimeout(() => input.remove(), 60000);
 }
 
+// files: File[] of [{file, folder}] (map importeren).
 async function importFiles(files) {
-  files = files.filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
-  if (!files.length) return toast("Kies PDF-bestanden");
-  let folder = "";
-  if (files.length > 1 && state.filter && state.filter !== "★") folder = state.filter;
+  let items = files.map((f) => (f instanceof Blob ? { file: f, folder: null } : f));
+  items = items.filter(({ file: f }) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
+  if (!items.length) return toast("Geen PDF-bestanden gevonden");
+  let defFolder = "";
+  if (items.length > 1 && state.filter && state.filter !== "★") defFolder = state.filter;
+  files = items;
   let ok = 0;
   let dup = 0;
   let fail = 0;
@@ -396,7 +457,7 @@ async function importFiles(files) {
     prog.querySelector("span").textContent = `Toevoegen ${i + 1} van ${files.length}…`;
     prog.querySelector("i").style.width = ((i + 0.5) / files.length) * 100 + "%";
     try {
-      const r = await importPdf(files[i], { folder });
+      const r = await importPdf(files[i].file, { folder: files[i].folder ?? defFolder });
       r.duplicate ? dup++ : ok++;
     } catch (e) {
       console.error(e);
@@ -883,6 +944,7 @@ async function renderSettings() {
   const group = (title, ...rows) => h("section", { class: "card set" }, h("h2", {}, title), ...rows);
 
   const est = await storageEstimate();
+  const sources = await folderSources();
   const songs = await allSongs();
   const lists = await allSetlists();
   const persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted().catch(() => false) : false;
@@ -902,9 +964,9 @@ async function renderSettings() {
     group(
       "Weergave",
       select("theme", "Thema", [["auto", "Automatisch"], ["light", "Licht"], ["dark", "Donker"]]),
-      select("viewMode", "Bladmuziek tonen", [["single", "Eén pagina"], ["double", "Twee pagina's"], ["scroll", "Doorlopend scrollen"]]),
-      toggle("autoDouble", "Liggend: twee pagina's", "Tablet dwars = twee pagina's naast elkaar"),
-      toggle("halfTurn", "Halve pagina omslaan", "Eerst de bovenkant van de volgende pagina"),
+      select("viewMode", "Bladmuziek tonen", [["single", "Eén pagina"], ["double", "Twee pagina's"], ["auto", "Automatisch (liggend = twee)"], ["scroll", "Doorlopend scrollen"]]),
+      toggle("halfTurn", "Halve pagina omslaan", "Eerst een halve pagina verder, dan de hele"),
+      select("halfOrder", "Halve pagina: volgorde", [["curTop", "Boven: rest van deze pagina"], ["nextTop", "Boven: begin volgende pagina"]]),
       toggle("autoCrop", "Witte randen wegsnijden", "Muziek wordt groter"),
       toggle("nightSheet", "Nachtstand", "Wit op zwart, fijn op een donker podium"),
       toggle("fullscreen", "Volledig scherm bij openen"),
@@ -930,6 +992,41 @@ async function renderSettings() {
       toggle("metroAccent", "Eerste tel harder"),
       select("tunerRef", "Stemtoon A", [[438, "438 Hz"], [440, "440 Hz"], [441, "441 Hz"], [442, "442 Hz"], [443, "443 Hz"]], Number)
     ),
+    sources.length || canLinkFolder()
+      ? group(
+          "Gekoppelde mappen",
+          ...sources.map((src) =>
+            h(
+              "div",
+              { class: "set-row" },
+              h("div", {}, h("div", { class: "set-l" }, src.name), h("div", { class: "set-s" }, src.lastSync ? "Bijgewerkt " + new Date(src.lastSync).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Nog niet bijgewerkt")),
+              h(
+                "div",
+                { class: "row-btns" },
+                h("button", {
+                  type: "button",
+                  class: "btn small",
+                  onclick: () => runFolderSync(() => regrantAndSync([src], progressText), "Bijgewerkt").then(renderSettings),
+                }, "Bijwerken"),
+                h("button", {
+                  type: "button",
+                  class: "btn small danger-o",
+                  onclick: async () => {
+                    if (await confirmDlg("Map ontkoppelen?", "Nummers die al zijn toegevoegd blijven staan.", "Ontkoppelen")) {
+                      await unlinkFolder(src.id);
+                      renderSettings();
+                    }
+                  },
+                }, "Ontkoppel")
+              )
+            )
+          ),
+          h("p", { class: "set-s pad-x" }, "Nieuwe en gewijzigde PDF's in deze mappen komen er bij het openen van de app vanzelf bij. Een submap wordt een Map in de bibliotheek."),
+          canLinkFolder()
+            ? h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", onclick: async () => { try { const src = await linkFolder(); await runFolderSync(() => syncFolder(src, progressText), `Map "${src.name}" gekoppeld`); renderSettings(); } catch (e) { if (e.name !== "AbortError") toast("Map koppelen mislukt"); } }, html: icon("folder") + "<span>Map koppelen</span>" }))
+            : null
+        )
+      : null,
     group(
       "Opslag & back-up",
       h("div", { class: "set-row" }, h("div", {}, h("div", { class: "set-l" }, `${songs.length} ${songs.length === 1 ? "nummer" : "nummers"}, ${lists.length} ${lists.length === 1 ? "lijst" : "lijsten"}`), h("div", { class: "set-s" }, est ? `${fmtBytes(est.usage)} gebruikt` + (persisted ? " · vastgezet ✓" : "") : ""))),
@@ -1037,7 +1134,7 @@ async function restore(file) {
 
 async function wipeAll() {
   if (!(await confirmDlg("Alles wissen?", "Alle nummers, krabbels en lijsten worden van dit apparaat verwijderd. Dit kan niet ongedaan worden.", "Alles wissen", true))) return;
-  for (const s of ["songs", "files", "thumbs", "notes", "audio", "setlists"]) await db.clear(s);
+  for (const s of ["songs", "files", "thumbs", "notes", "audio", "setlists", "sources"]) await db.clear(s);
   location.reload();
 }
 
@@ -1076,7 +1173,12 @@ function init() {
     if (b.dataset.tab === "lists" && state.tab === "lists") state.openList = null;
     setTab(b.dataset.tab);
   }));
-  $("#fab").addEventListener("click", () => (state.tab === "lists" ? createList() : pickFiles()));
+  $("#fab").addEventListener("click", () => (state.tab === "lists" ? createList() : addMenu()));
+  document.addEventListener("thumb-changed", (e) => {
+    const u = thumbUrls.get(e.detail);
+    if (u) URL.revokeObjectURL(u);
+    thumbUrls.delete(e.detail);
+  });
   document.addEventListener("library", () => {
     if (viewerOpen()) return;
     if (state.tab === "songs") renderSongs();
@@ -1086,6 +1188,14 @@ function init() {
   setTab("songs");
   importShared();
   allSongs().then((s) => s.length && persistStorage());
+  // Gekoppelde mappen stil bijwerken bij het starten.
+  syncAllFolders().then((r) => {
+    state.needPermission = r.needPermission;
+    if (r.added || r.updated) {
+      toast([r.added ? `${r.added} ${r.added === 1 ? "nieuw nummer" : "nieuwe nummers"}` : "", r.updated ? `${r.updated} bijgewerkt` : ""].filter(Boolean).join(", "), 3000);
+      document.dispatchEvent(new CustomEvent("library"));
+    } else if (r.needPermission.length && state.tab === "songs") renderSongs();
+  }).catch(() => {});
 
   initUpdates();
 }

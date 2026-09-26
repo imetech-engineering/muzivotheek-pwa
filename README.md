@@ -5,13 +5,16 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
 
 ## Functies
 
-- **Bibliotheek**: PDF's toevoegen (kiezen, slepen, of *Delen → Muzivotheek* vanuit WhatsApp/mail),
+- **Bibliotheek**: PDF's toevoegen (kiezen, slepen, *Delen → Muzivotheek* vanuit WhatsApp/mail, of een
+  hele map; op de computer blijft een gekoppelde map automatisch bijgewerkt, submap = Map),
   zoeken, sorteren (titel, componist, map, nieuwste, laatst geopend, meest gespeeld),
   filteren op map en favorieten, lijst- of rasterweergave.
-- **Lezer**: volledig scherm, scherm blijft aan, één/twee pagina's of doorlopend scrollen,
-  halve pagina omslaan, witte randen automatisch wegsnijden, nachtstand, knijpen/dubbeltik om te zoomen.
+- **Lezer**: volledig scherm, scherm blijft aan, één/twee/automatisch pagina's of doorlopend scrollen,
+  halve pagina omslaan (volgorde instelbaar), witte randen wegsnijden, nachtstand.
+  Zoomen via één camera-transform: knijpen, twee vingers schuiven, dubbeltik; niets verspringt.
 - **Omslaan**: tik rechts/links, vegen, bluetooth-pedaal (PageUp/PageDown/pijltjes), auto-scroll.
-- **Krabbels**: pen, markeerstift, tekens (p, mf, ♯, ♭, 𝄐, …), eigen tekst, gum, ongedaan maken.
+- **Krabbels**: pen, markeerstift, muzieksymbolen (Noto Music, OFL) met instelbare grootte,
+  verslepen, eigen tekst, gum, ongedaan maken.
 - **Bladwijzers en sprongen**: sprong-knopjes op de pagina voor herhalingen/D.S./coda, met *Terug*.
 - **Afspeellijsten**: maken, volgorde slepen, kopiëren; spelen loopt door naar het volgende nummer.
 - **Metronoom** (ook in de lezer, tempo per nummer bewaard) en **stemapparaat** (C/B♭/E♭/F).

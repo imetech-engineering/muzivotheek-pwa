@@ -19,7 +19,7 @@ export async function saveInk(songId, page, items) {
 
 // Teken alle items op ctx. box = zichtbaar deel van de pagina (bij bijsnijden),
 // w/h = pixelgrootte van het canvas.
-export function drawInk(ctx, items, box, w, h) {
+export function drawInk(ctx, items, box, w, h, selected = null) {
   ctx.clearRect(0, 0, w, h);
   const sx = w / box.w;
   const sy = h / box.h;
@@ -28,10 +28,23 @@ export function drawInk(ctx, items, box, w, h) {
   for (const it of items) {
     if (it.t === "text") {
       ctx.fillStyle = it.c;
-      ctx.font = `${it.b ? "italic bold" : "600"} ${Math.max(6, it.s * sx)}px Georgia, "Times New Roman", serif`;
+      ctx.font = fontFor(it, Math.max(6, it.s * sx));
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(it.v, X(it.x), Y(it.y));
+      if (it === selected) {
+        // Geselecteerd teken: stippelkader eromheen.
+        const m = ctx.measureText(it.v);
+        const px = Math.max(6, it.s * sx);
+        const bw = m.width + px * 0.5;
+        const bh = px * 1.3;
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = Math.max(1.5, px / 20);
+        ctx.strokeStyle = "#c41f6e";
+        ctx.strokeRect(X(it.x) - bw / 2, Y(it.y) - bh / 2, bw, bh);
+        ctx.restore();
+      }
       continue;
     }
     const p = it.p;
@@ -85,6 +98,82 @@ export function hitTest(items, x, y, r, aspect) {
   return best;
 }
 
-export const STAMPS = ["pp", "p", "mp", "mf", "f", "ff", "cresc.", "dim.", "rit.", "a tempo", "♯", "♭", "♮", "V", "𝄐", "↑", "↓", "!", "?", "①", "②", "③"];
-export const DYNAMICS = new Set(["pp", "p", "mp", "mf", "f", "ff", "cresc.", "dim.", "rit.", "a tempo"]);
+// Lettertype per soort teken: m = muziektekens (Noto Music), i = cursief
+// (rit., a tempo), t = gewone tekst.
+export const MUSIC_FONT = '"Muzi Music"';
+export function fontFor(it, px) {
+  const kind = it.f || (it.b ? "i" : "t");
+  if (kind === "m") return `${px}px ${MUSIC_FONT}, serif`;
+  if (kind === "i") return `italic 600 ${px}px Georgia, "Times New Roman", serif`;
+  return `600 ${px}px system-ui, sans-serif`;
+}
+
+export async function loadMusicFont() {
+  try {
+    await document.fonts.load(`32px ${MUSIC_FONT}`, "\u{1D191}");
+  } catch (e) {}
+}
+
+// Tekens voor de stempel-kiezer. v = wat er getekend wordt, f = soort.
+export const STAMP_GROUPS = [
+  {
+    name: "Dynamiek",
+    items: [
+      ["ppp", "\u{1D18F}\u{1D18F}\u{1D18F}"],
+      ["pp", "\u{1D18F}\u{1D18F}"],
+      ["p", "\u{1D18F}"],
+      ["mp", "\u{1D190}\u{1D18F}"],
+      ["mf", "\u{1D190}\u{1D191}"],
+      ["f", "\u{1D191}"],
+      ["ff", "\u{1D191}\u{1D191}"],
+      ["fff", "\u{1D191}\u{1D191}\u{1D191}"],
+      ["fp", "\u{1D191}\u{1D18F}"],
+      ["sfz", "\u{1D18D}\u{1D191}\u{1D18E}"],
+      ["cresc", "\u{1D192}"],
+      ["decresc", "\u{1D193}"],
+    ].map(([l, v]) => ({ label: l, v, f: "m" })),
+  },
+  {
+    name: "Tekens",
+    items: [
+      ["fermate", "\u{1D110}"],
+      ["adem", "\u{1D112}"],
+      ["caesuur", "\u{1D113}"],
+      ["segno", "\u{1D10B}"],
+      ["coda", "\u{1D10C}"],
+      ["herhaal begin", "\u{1D106}"],
+      ["herhaal eind", "\u{1D107}"],
+      ["kruis", "\u266F"],
+      ["mol", "\u266D"],
+      ["herstel", "\u266E"],
+      ["dubbelkruis", "\u{1D12A}"],
+      ["dubbelmol", "\u{1D12B}"],
+      ["neerstreek", "\u{1D1AA}"],
+      ["opstreek", "\u{1D1AB}"],
+    ].map(([l, v]) => ({ label: l, v, f: "m" })),
+  },
+  {
+    name: "Aandacht",
+    items: [
+      { label: "kijk uit", v: "\u{1F453}", f: "t" },
+      { label: "omhoog", v: "\u2191", f: "t" },
+      { label: "omlaag", v: "\u2193", f: "t" },
+      { label: "accent", v: ">", f: "i" },
+      { label: "uitroep", v: "!", f: "i" },
+      { label: "vraag", v: "?", f: "i" },
+      { label: "1", v: "\u2460", f: "t" },
+      { label: "2", v: "\u2461", f: "t" },
+      { label: "3", v: "\u2462", f: "t" },
+      { label: "4", v: "\u2463", f: "t" },
+    ],
+  },
+  {
+    name: "Aanwijzing",
+    items: ["rit.", "rall.", "a tempo", "cresc.", "dim.", "solo", "tutti", "tacet", "V.S."].map((v) => ({ label: v, v, f: "i" })),
+  },
+];
+
+// Grootte van tekens: fractie van de paginabreedte.
+export const STAMP_SIZES = [0.02, 0.03, 0.045, 0.065, 0.09];
+
 export const COLORS = ["#e11d48", "#2563eb", "#111111", "#16a34a", "#f59e0b", "#9333ea"];
