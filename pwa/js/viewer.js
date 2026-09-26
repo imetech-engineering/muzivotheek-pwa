@@ -114,6 +114,7 @@ export function closeViewer(fromPop = false) {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (!fromPop) history.back();
   document.dispatchEvent(new CustomEvent("library"));
+  document.dispatchEvent(new CustomEvent("viewer-closed"));
 }
 
 window.addEventListener("popstate", () => {

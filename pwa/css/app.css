@@ -1607,3 +1607,43 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
     height: 40px;
   }
 }
+
+/* ---------- update-melding ---------- */
+.update-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--nav-h) + var(--safe-b) + 92px);
+  transform: translate(-50%, 30px);
+  opacity: 0;
+  transition: 0.25s;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(480px, calc(100% - 24px));
+  background: #22252f;
+  color: #fff;
+  border-radius: 16px;
+  padding: 8px 8px 8px 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  font-weight: 600;
+}
+.update-bar.show {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+.update-bar span {
+  flex: 1;
+}
+.update-bar .later {
+  background: none;
+  border-color: transparent;
+  color: #cfd3e0;
+}
+.update-bar .primary {
+  background: var(--pink);
+  border-color: var(--pink);
+}
+body.viewing .update-bar {
+  display: none;
+}

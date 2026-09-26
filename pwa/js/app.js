@@ -11,6 +11,7 @@ import { Metronome, tempoName } from "./metronome.js";
 import { Tuner } from "./tuner.js";
 import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, fmtDate } from "./ui.js";
 import { icon } from "./icons.js";
+import { initUpdates, check as checkUpdate, applyUpdate, BUILD } from "./update.js";
 
 const VERSION = "1.0.0";
 const S = () => settings();
@@ -954,10 +955,23 @@ async function renderSettings() {
       "div",
       { class: "about" },
       h("img", { src: "branding/eendracht.png", alt: "Eendracht Aalten", class: "about-logo" }),
-      h("div", {}, h("b", {}, "Muzivotheek"), " · versie " + VERSION),
+      h("div", {}, h("b", {}, "Muzivotheek"), " · versie " + VERSION + (BUILD.startsWith("__") ? "" : " (" + BUILD + ")")),
+      h("button", { type: "button", class: "btn small", onclick: manualUpdateCheck }, "Controleren op updates"),
       h("div", { class: "set-s" }, "Werkt offline. Je muziek verlaat dit apparaat niet.")
     )
   );
+}
+
+async function manualUpdateCheck(e) {
+  const b = e.currentTarget;
+  b.textContent = "Bezig met controleren…";
+  const r = await checkUpdate();
+  if (r === "new") {
+    if (await confirmDlg("Nieuwe versie beschikbaar", "Nu bijwerken? Je muziek en lijsten blijven gewoon bewaard.", "Bijwerken")) applyUpdate();
+    b.textContent = "Controleren op updates";
+  } else {
+    b.textContent = r === "offline" ? "Geen internet, probeer later" : "Je hebt de nieuwste versie ✓";
+  }
 }
 
 async function backup() {
@@ -1073,18 +1087,7 @@ function init() {
   importShared();
   allSongs().then((s) => s.length && persistStorage());
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./service-worker.js").then((reg) => {
-      reg.addEventListener("updatefound", () => {
-        const nw = reg.installing;
-        nw && nw.addEventListener("statechange", () => {
-          if (nw.state === "installed" && navigator.serviceWorker.controller) {
-            toast("Nieuwe versie klaar. Herstart de app om bij te werken.", 5000);
-          }
-        });
-      });
-    }).catch(() => {});
-  }
+  initUpdates();
 }
 
 init();

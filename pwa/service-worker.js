@@ -1,5 +1,7 @@
-// Offline: alle app-bestanden in de cache. Verhoog VERSION bij elke wijziging.
-const VERSION = "v1";
+// Offline: alle app-bestanden in de cache. VERSION wordt bij publiceren
+// automatisch vervangen door de commit (zie .github/workflows/deploy.yml),
+// dus elke push is een nieuwe versie.
+const VERSION = "__BUILD__";
 const CACHE = "muzivotheek-" + VERSION;
 const ASSETS = [
   "./",
@@ -18,6 +20,7 @@ const ASSETS = [
   "./js/setlists.js",
   "./js/tuner.js",
   "./js/ui.js",
+  "./js/update.js",
   "./js/viewer.js",
   "./vendor/pdfjs/pdf.min.mjs",
   "./vendor/pdfjs/pdf.worker.min.mjs",
@@ -34,8 +37,12 @@ self.addEventListener("install", (event) => {
     caches
       .open(CACHE)
       .then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: "reload" }))))
-      .then(() => self.skipWaiting())
   );
+  // Niet meteen overnemen: de app vraagt eerst of je wilt bijwerken.
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {

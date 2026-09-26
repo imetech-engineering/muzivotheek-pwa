@@ -38,5 +38,8 @@ Geen build-stap. Lokaal draaien: `cd pwa && python3 -m http.server 8000`.
 
 Push naar `main`. Eenmalig: **Settings → Pages → Source: GitHub Actions**.
 
-Bij elke wijziging `VERSION` in `pwa/service-worker.js` ophogen, anders blijft
-de oude versie in de cache hangen.
+Updates gaan vanzelf: bij publiceren wordt `__BUILD__` in `service-worker.js`
+en `js/update.js` vervangen door datum + commit. De app controleert bij openen,
+bij terugkeren en elk half uur, en toont dan *Nieuwe versie beschikbaar →
+Bijwerken*. Terwijl de lezer open is wacht de melding tot je hem sluit.
+Handmatig kan via Instellingen → *Controleren op updates*.
