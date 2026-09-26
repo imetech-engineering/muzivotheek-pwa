@@ -12,7 +12,7 @@ import { loadInk, saveInk, drawInk, hitTest, STAMP_GROUPS, STAMP_SIZES, COLORS, 
 import { Metronome, tempoName } from "./metronome.js";
 import { $, h, fill, toast, dialog, promptDlg, confirmDlg, menu, fmtTime } from "./ui.js";
 import { icon } from "./icons.js";
-import { parseYouTube, searchUrl, YouTubePlayer } from "./youtube.js";
+import { parseYouTube, YouTubePlayer, pickYouTube } from "./youtube.js";
 
 const root = () => $("#viewer");
 const S = () => settings();
@@ -1620,7 +1620,22 @@ function renderAudio(p) {
     fileIn,
     h("button", { type: "button", class: "btn small", onclick: () => fileIn.click(), html: icon("upload") + `<span>${hasFile ? "Andere opname" : "Opname (mp3)"}</span>` }),
     h("button", { type: "button", class: "btn small", onclick: setYt, html: icon("play") + `<span>${hasYt ? "Andere YouTube" : "YouTube-link"}</span>` }),
-    h("a", { class: "btn small", href: searchUrl(st.song), target: "_blank", rel: "noopener", html: icon("search") + "<span>Zoek op YouTube</span>" })
+    h("button", {
+      type: "button",
+      class: "btn small",
+      onclick: async () => {
+        const link = await pickYouTube(st.song);
+        if (!link) return;
+        st.song.youtube = link;
+        await saveSong(st.song);
+        setupAudio();
+        st.src = "yt";
+        updateChrome();
+        renderAudio(p);
+        toast("YouTube gekoppeld", 1500);
+      },
+      html: icon("search") + "<span>Zoek op YouTube</span>",
+    })
   );
 
   if (!hasFile && !hasYt) {

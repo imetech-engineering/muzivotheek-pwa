@@ -5,6 +5,7 @@
 //   GET /list?link=<deellink>[&path=<map>]  -> inhoud van de map (JSON)
 //   GET /file?link=<deellink>&path=<bestand> -> het bestand (PDF)
 //   GET /check?link=<deellink>               -> controle: wat er gebeurt (voor hulp bij problemen)
+//   GET /yt?q=<zoekterm>                     -> YouTube-zoekresultaten (voor "meespelen")
 //
 // Alleen lezen. Er wordt niets bewaard behalve een tijdelijke sessie in het
 // geheugen. Alleen *.sharepoint.com-links en alleen verzoeken van de app.
@@ -33,6 +34,14 @@ export default {
 
     // Van een andere website dan de app? Weigeren (de controlepagina mag wel, voor hulp).
     if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ error: "Niet toegestaan" }, 403);
+
+    if (url.pathname === "/yt") {
+      try {
+        return json({ results: await youtubeSearch(url.searchParams.get("q") || "") });
+      } catch (e) {
+        return json({ error: "Zoeken op YouTube lukt nu niet" }, 502);
+      }
+    }
 
     const link = (url.searchParams.get("link") || "").trim();
     if (url.pathname === "/" || !link) return json({ ok: true, info: "Muzivotheek SharePoint-tussenservice. Gebruik /check?link=<deellink> om een link te testen." });
@@ -243,5 +252,45 @@ async function check(link) {
     out.error = e.message;
     out.code = e.code;
   }
+  return out;
+}
+
+// ---------- YouTube zoeken ----------
+// Haalt de gewone zoekpagina op en leest de resultaten uit de ingebouwde data
+// (ytInitialData). Geen account of sleutel nodig.
+async function youtubeSearch(q) {
+  q = q.trim().slice(0, 120);
+  if (!q) return [];
+  const r = await fetch("https://www.youtube.com/results?hl=nl&gl=NL&search_query=" + encodeURIComponent(q), {
+    headers: {
+      "User-Agent": UA,
+      "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8",
+      // Cookie-toestemming overslaan (anders stuurt YouTube in Europa een toestemmingspagina).
+      Cookie: "SOCS=CAI; CONSENT=YES+1",
+    },
+  });
+  const html = await r.text();
+  const start = html.indexOf("ytInitialData");
+  if (start < 0) throw new Error("geen data");
+  const open = html.indexOf("{", start);
+  const end = html.indexOf(";</script>", open);
+  const data = JSON.parse(html.slice(open, end));
+  const out = [];
+  (function walk(o) {
+    if (!o || typeof o !== "object" || out.length >= 15) return;
+    if (o.videoRenderer && o.videoRenderer.videoId) {
+      const v = o.videoRenderer;
+      const text = (t) => (t && (t.simpleText || (t.runs || []).map((x) => x.text).join(""))) || "";
+      out.push({
+        id: v.videoId,
+        title: text(v.title),
+        channel: text(v.ownerText || v.longBylineText),
+        duration: text(v.lengthText),
+        thumb: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+      });
+      return;
+    }
+    for (const k in o) walk(o[k]);
+  })(data);
   return out;
 }

@@ -11,7 +11,7 @@ import { Metronome, tempoName } from "./metronome.js";
 import { Tuner } from "./tuner.js";
 import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, fmtDate } from "./ui.js";
 import { icon } from "./icons.js";
-import { parseYouTube, searchUrl } from "./youtube.js";
+import { parseYouTube, pickYouTube } from "./youtube.js";
 import { canLinkFolder, canPickFolderOnce, linkFolder, unlinkFolder, folderSources, syncFolder, syncAllFolders, regrantAndSync, pickFolderOnce } from "./folders.js";
 import { openSharePoint, openSharePointWithLink, fixBrokenLinks, resumeAfterRedirect, spSettings } from "./sp_ui.js";
 import { spConfigured, syncAllSharePoint } from "./sharepoint.js";
@@ -361,7 +361,7 @@ export async function editSong(id, onSaved) {
     "div",
     { class: "form-row" },
     h("span", {}, "YouTube"),
-    h("div", { class: "audio-row" }, youtube, h("a", { class: "btn small", href: searchUrl(s), target: "_blank", rel: "noopener", title: "Zoek op YouTube", html: icon("search") }))
+    h("div", { class: "audio-row" }, youtube, h("button", { type: "button", class: "btn small", title: "Zoek op YouTube", "aria-label": "Zoek op YouTube", onclick: async () => { const l = await pickYouTube({ title: title.value, composer: composer.value }); if (l) youtube.value = l; }, html: icon("search") }))
   );
   const audioRow = h(
     "div",

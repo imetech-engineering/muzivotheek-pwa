@@ -1977,3 +1977,73 @@ textarea {
   min-width: 70px;
   text-align: center;
 }
+
+/* ---------- YouTube zoeken ---------- */
+.yt-search {
+  display: grid;
+  gap: 10px;
+}
+.yt-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 55vh;
+  max-height: calc(var(--vvh, 100dvh) * 0.55);
+  overflow-y: auto;
+}
+.yt-hit {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 6px;
+  border-radius: 12px;
+}
+.yt-hit:active {
+  background: var(--card-2);
+}
+.yt-thumb {
+  position: relative;
+  width: 120px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  flex: none;
+}
+.yt-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.yt-thumb i {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.yt-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.yt-meta b {
+  font-size: 15px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.yt-meta small {
+  color: var(--text-2);
+}

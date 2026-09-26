@@ -81,6 +81,9 @@ export function dialog({ title, content, buttons = [{ label: "OK", value: true, 
       if (e.target === back) close(undefined);
     });
     const onKey = (e) => {
+      // Alleen de bovenste pop-up reageert (bv. zoeken bovenop "Gegevens").
+      const all = document.querySelectorAll(".dlg-back");
+      if (all[all.length - 1] !== back) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         close(undefined);

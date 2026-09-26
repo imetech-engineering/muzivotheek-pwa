@@ -1,3 +1,5 @@
+import { h, fill, dialog, toast } from "./ui.js";
+
 // YouTube bij een nummer: link opslaan en afspelen via de officiële
 // YouTube-speler (youtube-nocookie). Werkt alleen met internet; video's worden
 // niet gedownload (mag niet volgens YouTube).
@@ -110,4 +112,76 @@ export class YouTubePlayer {
     } catch (e) {}
     this.p = null;
   }
+}
+
+// ---------- zoeken in de app ----------
+// Via de eigen tussenservice (zie worker/), zodat je de app niet uit hoeft.
+
+
+export const canSearchInApp = () => /^https:\/\//.test((window.MUZI_CONFIG || {}).proxyUrl || "");
+
+export async function searchYouTube(q) {
+  const u = new URL("yt", window.MUZI_CONFIG.proxyUrl.replace(/\/?$/, "/"));
+  u.searchParams.set("q", q);
+  const r = await fetch(u);
+  const d = await r.json().catch(() => null);
+  if (!r.ok || !d || !Array.isArray(d.results)) throw new Error((d && d.error) || "Zoeken lukt nu niet");
+  return d.results;
+}
+
+// Zoekscherm. Geeft de gekozen YouTube-link terug, of null.
+export async function pickYouTube(song) {
+  if (!canSearchInApp()) {
+    window.open(searchUrl(song), "_blank", "noopener");
+    return null;
+  }
+  if (!navigator.onLine) {
+    toast("Zoeken op YouTube kan alleen met internet", 2500);
+    return null;
+  }
+  let chosen = null;
+  const q = h("input", { class: "field", type: "search", value: [song.title, song.composer].filter(Boolean).join(" "), enterkeyhint: "search" });
+  const list = h("div", { class: "yt-results" });
+  let seq = 0;
+  const run = async () => {
+    const my = ++seq;
+    fill(list, h("p", { class: "muted center pad" }, "Zoeken…"));
+    try {
+      const res = await searchYouTube(q.value);
+      if (my !== seq) return;
+      if (!res.length) return fill(list, h("p", { class: "muted center pad" }, "Niets gevonden."));
+      fill(
+        list,
+        res.map((v) =>
+          h(
+            "button",
+            {
+              type: "button",
+              class: "yt-hit",
+              onclick: () => {
+                chosen = "https://youtu.be/" + v.id;
+                dialog.close && dialog.close(true);
+              },
+            },
+            h("span", { class: "yt-thumb" }, h("img", { src: v.thumb, alt: "", loading: "lazy" }), v.duration ? h("i", {}, v.duration) : null),
+            h("span", { class: "yt-meta" }, h("b", {}, v.title), h("small", {}, v.channel))
+          )
+        )
+      );
+    } catch (e) {
+      if (my === seq) fill(list, h("p", { class: "muted center pad" }, e.message));
+    }
+  };
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      q.blur();
+      run();
+    }
+  });
+  const go = h("button", { type: "button", class: "btn primary", onclick: run }, "Zoek");
+  run();
+  await dialog({ title: "Zoek op YouTube", content: h("div", { class: "yt-search" }, h("div", { class: "paste-row" }, q, go), list), cls: "wide", buttons: [{ label: "Sluiten", value: false }] });
+  return chosen;
 }
