@@ -996,7 +996,7 @@ async function renderSettings() {
       "Weergave",
       select("theme", "Thema", [["auto", "Automatisch"], ["light", "Licht"], ["dark", "Donker"]]),
       select("viewMode", "Bladmuziek tonen", [["single", "Eén pagina"], ["double", "Twee pagina's"], ["auto", "Automatisch (liggend = twee)"], ["scroll", "Doorlopend scrollen"]]),
-      toggle("halfTurn", "Halve pagina omslaan", "Eerst een halve pagina verder, dan de hele"),
+      toggle("halfTurn", "Halve pagina omslaan", "Eerst een halve pagina verder, dan de hele (bij één pagina)"),
       select("halfOrder", "Halve pagina: volgorde", [["curTop", "Boven: rest van deze pagina"], ["nextTop", "Boven: begin volgende pagina"]]),
       toggle("autoCrop", "Witte randen wegsnijden", "Muziek wordt groter"),
       toggle("nightSheet", "Nachtstand", "Wit op zwart, fijn op een donker podium"),

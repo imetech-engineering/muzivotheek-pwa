@@ -339,7 +339,8 @@ function effectiveMode() {
   const landscape = W > H * 1.15;
   let m = S().viewMode;
   if (st.autoScroll) return "scroll";
-  if (m === "auto") m = landscape && st.pages > 1 ? "double" : "single";
+  // Automatisch + halve pagina: één pagina (halve pagina werkt niet bij twee naast elkaar).
+  if (m === "auto") m = landscape && st.pages > 1 && !S().halfTurn ? "double" : "single";
   if (m === "double" && st.pages < 2) m = "single";
   return m;
 }
@@ -1771,9 +1772,21 @@ async function moreMenu() {
     cam.z = 1;
     st.half = false;
   } else if (v === "half") {
-    setSetting("halfTurn", !S().halfTurn);
+    const on = !S().halfTurn;
+    setSetting("halfTurn", on);
     st.half = false;
-  } else if (v === "halforder") setSetting("halfOrder", S().halfOrder === "nextTop" ? "curTop" : "nextTop");
+    if (on) {
+      // Halve pagina werkt alleen met één pagina tegelijk: daarheen schakelen.
+      if (effectiveMode() !== "single") setSetting("viewMode", "single");
+      cam.z = 1;
+      // Meteen laten zien hoe het eruitziet (als er nog een volgende pagina is).
+      if (st.page < st.pages) st.half = true;
+      toast(st.page < st.pages ? "Halve pagina aan: tik verder voor de rest" : "Halve pagina aan (dit is de laatste pagina)", 2500);
+    } else toast("Halve pagina uit", 1500);
+  } else if (v === "halforder") {
+    setSetting("halfOrder", S().halfOrder === "nextTop" ? "curTop" : "nextTop");
+    if (st.page < st.pages) st.half = true;
+  }
   else if (v === "crop") {
     setSetting("autoCrop", !S().autoCrop);
     st.cache.clear();
