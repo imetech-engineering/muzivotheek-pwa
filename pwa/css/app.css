@@ -855,7 +855,10 @@ input[type="range"].block {
 /* ---------- dialogen ---------- */
 .dlg-back {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: var(--vvt, 0px);
+  height: var(--vvh, 100dvh);
   background: rgba(10, 12, 20, 0.45);
   display: flex;
   align-items: center;
@@ -875,7 +878,7 @@ input[type="range"].block {
   width: 100%;
   max-width: 480px;
   max-height: calc(100vh - 32px);
-  max-height: calc(100dvh - 32px);
+  max-height: calc(var(--vvh, 100dvh) - 32px);
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
@@ -1884,4 +1887,23 @@ body.viewing .update-bar {
 .set-s.warn {
   color: var(--danger);
   font-weight: 600;
+}
+
+/* Invoervelden: selecteren, knippen en plakken altijd toestaan. */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.paste-row {
+  display: flex;
+  gap: 8px;
+}
+.paste-row .field {
+  flex: 1;
+  min-width: 0;
+}
+.paste-btn {
+  flex: none;
 }

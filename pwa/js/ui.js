@@ -29,6 +29,26 @@ export function fill(el, ...kids) {
 export const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
+// Zichtbare schermruimte (zonder toetsenbord) als CSS-variabelen, zodat pop-ups
+// boven het toetsenbord blijven en hun knoppen niet verdwijnen.
+(function trackViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const set = () => {
+    document.documentElement.style.setProperty("--vvh", vv.height + "px");
+    document.documentElement.style.setProperty("--vvt", vv.offsetTop + "px");
+  };
+  vv.addEventListener("resize", set);
+  vv.addEventListener("scroll", set);
+  set();
+})();
+
+// Veld in een pop-up krijgt focus: in beeld schuiven boven het toetsenbord.
+document.addEventListener("focusin", (e) => {
+  if (!e.target.closest || !e.target.closest(".dlg") || !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  setTimeout(() => e.target.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+});
+
 let toastTimer = 0;
 export function toast(msg, ms = 2200) {
   const t = $("#toast");
@@ -92,11 +112,32 @@ export function confirmDlg(title, text, okLabel = "OK", danger = false) {
   }).then((v) => !!v);
 }
 
-export function promptDlg(title, value = "", { placeholder = "", type = "text", okLabel = "OK" } = {}) {
-  const input = h("input", { class: "field", type, value, placeholder, inputmode: type === "number" ? "numeric" : null });
+export function promptDlg(title, value = "", { placeholder = "", type = "text", okLabel = "OK", paste = false } = {}) {
+  const input = h("input", { class: "field", type, value, placeholder, inputmode: type === "number" ? "numeric" : type === "url" ? "url" : null, autocomplete: "off" });
+  // Knop "Plakken": handig voor links, want lang drukken is op sommige telefoons lastig.
+  const pasteBtn = paste
+    ? h("button", {
+        type: "button",
+        class: "btn paste-btn",
+        onclick: async () => {
+          try {
+            const t = await navigator.clipboard.readText();
+            if (t) {
+              input.value = t.trim();
+              return;
+            }
+            toast("Het klembord is leeg. Kopieer eerst de link.", 3000);
+          } catch (e) {
+            input.focus();
+            toast("Houd je vinger in het veld en kies Plakken", 3000);
+          }
+        },
+        html: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg><span>Plakken</span>',
+      })
+    : null;
   return dialog({
     title,
-    content: input,
+    content: paste ? h("div", { class: "paste-row" }, input, pasteBtn) : input,
     buttons: [
       { label: "Annuleren", value: null },
       { label: okLabel, value: () => input.value.trim(), kind: "primary" },

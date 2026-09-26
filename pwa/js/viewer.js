@@ -1597,7 +1597,7 @@ function renderAudio(p) {
     },
   });
   const setYt = async () => {
-    const v = await promptDlg("YouTube-link", st.song.youtube || "", { placeholder: "Plak hier de link van YouTube" });
+    const v = await promptDlg("YouTube-link", st.song.youtube || "", { placeholder: "https://youtu.be/…", type: "url", paste: true });
     if (v == null) return;
     if (v && !parseYouTube(v)) return toast("Dat is geen geldige YouTube-link", 3000);
     st.song.youtube = v || "";

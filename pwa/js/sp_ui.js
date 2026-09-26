@@ -57,7 +57,7 @@ export async function openSharePoint() {
 // Link vragen. replace = bestaande map waarvoor dit de nieuwe link is.
 async function askLink(prefill = "", replace = null) {
   const title = replace ? `Nieuwe link voor "${replace.name}"` : "Plak de SharePoint-link van de map";
-  let link = await promptDlg(title, prefill, { placeholder: "https://…sharepoint.com/…", okLabel: "Verbinden" });
+  let link = await promptDlg(title, prefill, { placeholder: "https://…sharepoint.com/…", okLabel: "Verbinden", type: "url", paste: true });
   if (!link) return null;
   link = extractLink(link);
   if (!link) {
