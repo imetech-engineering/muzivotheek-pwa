@@ -12,6 +12,7 @@ import { loadInk, saveInk, drawInk, hitTest, STAMP_GROUPS, STAMP_SIZES, COLORS, 
 import { Metronome, tempoName } from "./metronome.js";
 import { $, h, fill, toast, dialog, promptDlg, confirmDlg, menu, fmtTime } from "./ui.js";
 import { icon } from "./icons.js";
+import { parseYouTube, searchUrl, YouTubePlayer } from "./youtube.js";
 
 const root = () => $("#viewer");
 const S = () => settings();
@@ -39,6 +40,8 @@ const st = {
   metro: new Metronome(),
   wake: null,
   audioUrl: null,
+  src: "file", // meespelen: "file" (opname) of "yt" (YouTube)
+  yt: null,
   loopA: null,
   loopB: null,
   penSeen: false,
@@ -107,6 +110,9 @@ export function closeViewer(fromPop = false) {
   if (a) a.pause();
   if (st.audioUrl) URL.revokeObjectURL(st.audioUrl);
   st.audioUrl = null;
+  clearInterval(audioTimer);
+  if (st.yt) st.yt.destroy();
+  st.yt = null;
   if (st.doc) st.doc.destroy();
   st.doc = null;
   st.cache.clear();
@@ -169,7 +175,7 @@ function buildDom() {
       btn("bookmark", "Bladwijzer", () => togglePanel("marks")),
       btn("pen", "Krabbels", () => (st.tool ? setTool(null) : setTool("pen"))),
       btn("metronome", "Tempo", () => togglePanel("metro")),
-      btn("audio", "Audio", () => togglePanel("audio"), "v-audio-btn"),
+      btn("audio", "Meespelen", () => togglePanel("audio"), "v-audio-btn"),
       btn("scroll", "Scroll", () => toggleAutoScroll()),
       btn("more", "Meer", () => moreMenu())
     )
@@ -189,7 +195,8 @@ function buildDom() {
   const ret = h("button", { type: "button", class: "v-return", id: "v-return", hidden: true, onclick: () => jumpBack(), html: icon("undo") + "<span>Terug</span>" });
   const scrollPill = h("div", { class: "v-scrollpill", id: "v-scrollpill", hidden: true });
 
-  r.append(stage, flash, top, bottom, tools, panel, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
+  const ytBox = h("div", { class: "v-yt-box", id: "v-yt-box" }, h("div", { id: "v-yt-frame" }));
+  r.append(stage, flash, top, bottom, tools, panel, ytBox, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
   attachGestures(stage);
   let lastSize = "";
   new ResizeObserver(() => {
@@ -1360,6 +1367,7 @@ function closePanels() {
     p.hidden = true;
     p.dataset.kind = "";
   }
+  showYtBox(false);
 }
 
 function togglePanel(kind) {
@@ -1484,6 +1492,18 @@ function renderMetro(p) {
   );
 }
 
+// ---------- meespelen: opname (mp3) of YouTube ----------
+//
+// Beide bronnen hebben dezelfde bediening (spelen, −10/+10 s, tempo, A-B herhalen).
+// De YouTube-speler blijft in #v-yt-box staan (een iframe verplaatsen herlaadt hem);
+// is het paneel dicht, dan wordt hij onzichtbaar maar speelt hij door.
+
+let audioTimer = 0;
+
+function player() {
+  return st.src === "yt" ? st.yt : $("#v-audio-el");
+}
+
 function setupAudio() {
   const a = $("#v-audio-el");
   a.pause();
@@ -1491,71 +1511,171 @@ function setupAudio() {
   st.audioUrl = null;
   st.loopA = st.loopB = null;
   a.removeAttribute("src");
-  if (!st.song.audioId) return;
-  db.get("audio", st.song.audioId).then((rec) => {
-    if (!rec || !st.open) return;
-    st.audioUrl = URL.createObjectURL(rec.blob);
-    a.src = st.audioUrl;
-    a.preservesPitch = true;
-  });
-  a.ontimeupdate = () => {
-    if (st.loopA != null && st.loopB != null && a.currentTime >= st.loopB) a.currentTime = st.loopA;
+  if (st.yt) st.yt.destroy();
+  st.yt = null;
+  const box = $("#v-yt-box");
+  if (box) fill(box, h("div", { id: "v-yt-frame" }));
+  st.src = st.song.audioId ? "file" : st.song.youtube ? "yt" : "file";
+  if (st.song.audioId) {
+    db.get("audio", st.song.audioId).then((rec) => {
+      if (!rec || !st.open) return;
+      st.audioUrl = URL.createObjectURL(rec.blob);
+      a.src = st.audioUrl;
+      a.preservesPitch = true;
+    });
+  }
+  clearInterval(audioTimer);
+  // Positie bijwerken en A-B herhalen (voor beide bronnen).
+  audioTimer = setInterval(() => {
+    if (!st.open) return clearInterval(audioTimer);
+    const pl = player();
+    if (!pl) return;
+    const t = pl.currentTime;
+    if (st.loopA != null && st.loopB != null && t >= st.loopB) pl.currentTime = st.loopA;
     const pos = $("#vp-pos");
     if (pos && !pos._drag) {
-      pos.max = a.duration || 0;
-      pos.value = a.currentTime;
-      $("#vp-time").textContent = fmtTime(a.currentTime) + " / " + fmtTime(a.duration);
+      pos.max = pl.duration || 0;
+      pos.value = t;
+      $("#vp-time").textContent = fmtTime(t) + " / " + fmtTime(pl.duration);
     }
-  };
+    const play = $("#vp-play");
+    if (play && play._paused !== pl.paused) {
+      play._paused = pl.paused;
+      play.innerHTML = icon(pl.paused ? "play" : "pause");
+    }
+  }, 200);
+}
+
+function ensureYouTube() {
+  if (st.yt || !st.song.youtube) return;
+  const yt = parseYouTube(st.song.youtube);
+  if (!yt) return;
+  st.yt = new YouTubePlayer($("#v-yt-frame"), yt);
+  st.yt.ready.catch((e) => toast(e.message, 3000));
+}
+
+// De speler over de lege ruimte in het paneel leggen.
+function showYtBox(show) {
+  const box = $("#v-yt-box");
+  if (!box) return;
+  box.classList.toggle("show", show);
+  if (!show) return;
+  requestAnimationFrame(() => {
+    const space = $("#v-panel .vp-ytspace");
+    if (!space) return;
+    const r = space.getBoundingClientRect();
+    const rr = root().getBoundingClientRect();
+    Object.assign(box.style, { left: r.left - rr.left + "px", top: r.top - rr.top + "px", width: r.width + "px", height: r.height + "px" });
+  });
+}
+
+function stopMedia() {
+  $("#v-audio-el") && $("#v-audio-el").pause();
+  st.yt && st.yt.pause();
 }
 
 function renderAudio(p) {
-  const a = $("#v-audio-el");
-  if (!st.song.audioId) {
-    const input = h("input", { type: "file", accept: "audio/*", hidden: true, onchange: async (e) => {
+  const hasFile = !!st.song.audioId;
+  const hasYt = !!st.song.youtube;
+  if (!hasFile && hasYt) st.src = "yt";
+  if (hasFile && !hasYt) st.src = "file";
+
+  const fileIn = h("input", {
+    type: "file",
+    accept: "audio/*,.mp3,.m4a,.wav,.ogg",
+    hidden: true,
+    onchange: async (e) => {
       const f = e.target.files[0];
       if (!f) return;
       await attachAudio(st.song, f);
       setupAudio();
+      st.src = "file";
       updateChrome();
       renderAudio(p);
-    } });
-    fill(p, panelHead("Audio"), h("p", { class: "muted" }, "Koppel een opname om mee te spelen."), input, h("button", { type: "button", class: "btn primary block", onclick: () => input.click(), html: icon("upload") + "<span>Audio kiezen</span>" }));
+      toast("Opname gekoppeld");
+    },
+  });
+  const setYt = async () => {
+    const v = await promptDlg("YouTube-link", st.song.youtube || "", { placeholder: "Plak hier de link van YouTube" });
+    if (v == null) return;
+    if (v && !parseYouTube(v)) return toast("Dat is geen geldige YouTube-link", 3000);
+    st.song.youtube = v || "";
+    await saveSong(st.song);
+    setupAudio();
+    st.src = v ? "yt" : st.src;
+    updateChrome();
+    renderAudio(p);
+  };
+  const linkRow = h(
+    "div",
+    { class: "vp-links" },
+    fileIn,
+    h("button", { type: "button", class: "btn small", onclick: () => fileIn.click(), html: icon("upload") + `<span>${hasFile ? "Andere opname" : "Opname (mp3)"}</span>` }),
+    h("button", { type: "button", class: "btn small", onclick: setYt, html: icon("play") + `<span>${hasYt ? "Andere YouTube" : "YouTube-link"}</span>` }),
+    h("a", { class: "btn small", href: searchUrl(st.song), target: "_blank", rel: "noopener", html: icon("search") + "<span>Zoek op YouTube</span>" })
+  );
+
+  if (!hasFile && !hasYt) {
+    showYtBox(false);
+    fill(p, panelHead("Meespelen"), h("p", { class: "muted" }, "Koppel een opname (mp3) of een YouTube-video om mee te spelen."), linkRow);
     return;
   }
-  const play = h("button", { type: "button", class: "btn primary", html: icon(a.paused ? "play" : "pause"), onclick: () => { a.paused ? a.play() : a.pause(); } });
-  a.onplay = a.onpause = () => (play.innerHTML = icon(a.paused ? "play" : "pause"));
-  const pos = h("input", { type: "range", id: "vp-pos", min: 0, step: 0.1, max: a.duration || 0, value: a.currentTime, class: "block" });
+
+  const tabs =
+    hasFile && hasYt
+      ? h(
+          "div",
+          { class: "seg" },
+          [["file", "Opname"], ["yt", "YouTube"]].map(([v, l]) =>
+            h("button", { type: "button", class: st.src === v ? "on" : "", onclick: () => { if (st.src !== v) { stopMedia(); st.src = v; st.loopA = st.loopB = null; renderAudio(p); } } }, l)
+          )
+        )
+      : null;
+
+  if (st.src === "yt") {
+    ensureYouTube();
+    showYtBox(true);
+  } else showYtBox(false);
+
+  const pl = player();
+  const play = h("button", { type: "button", id: "vp-play", class: "btn primary", html: icon("play"), onclick: () => { pl.paused ? pl.play() : pl.pause(); } });
+  const pos = h("input", { type: "range", id: "vp-pos", min: 0, step: 0.1, max: pl.duration || 0, value: pl.currentTime || 0, class: "block" });
   pos.addEventListener("pointerdown", () => (pos._drag = true));
-  pos.addEventListener("change", () => { a.currentTime = +pos.value; pos._drag = false; });
+  pos.addEventListener("change", () => { pl.currentTime = +pos.value; pos._drag = false; });
   const loopBtn = (label, which) =>
     h("button", {
       type: "button",
       class: "btn" + (st[which] != null ? " on" : ""),
-      onclick: (e) => {
-        st[which] = st[which] == null ? a.currentTime : null;
+      onclick: () => {
+        st[which] = st[which] == null ? pl.currentTime : null;
         if (st.loopA != null && st.loopB != null && st.loopB <= st.loopA) st.loopB = null;
         renderAudio(p);
       },
     }, label + (st[which] != null ? " " + fmtTime(st[which]) : ""));
+  const rates = st.src === "yt" ? [0.5, 0.75, 1, 1.25, 1.5] : [0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1, 1.1, 1.25];
   const speed = h(
     "select",
-    { class: "field small", onchange: (e) => (a.playbackRate = +e.target.value) },
-    [0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1, 1.1, 1.25].map((v) => h("option", { value: v, selected: Math.abs(a.playbackRate - v) < 0.01 }, Math.round(v * 100) + "%"))
+    { class: "field small", "aria-label": "Tempo", onchange: (e) => (pl.playbackRate = +e.target.value) },
+    rates.map((v) => h("option", { value: v, selected: Math.abs((pl.playbackRate || 1) - v) < 0.01 }, Math.round(v * 100) + "%"))
   );
-  fill(p, 
-    panelHead("Audio"),
+  fill(
+    p,
+    panelHead("Meespelen"),
+    tabs,
+    st.src === "yt" ? h("div", { class: "vp-ytspace" }) : null,
+    st.src === "yt" && !navigator.onLine ? h("p", { class: "muted" }, "YouTube werkt alleen met internet.") : null,
     pos,
-    h("div", { class: "vp-time", id: "vp-time" }, fmtTime(a.currentTime) + " / " + fmtTime(a.duration)),
+    h("div", { class: "vp-time", id: "vp-time" }, fmtTime(pl.currentTime || 0) + " / " + fmtTime(pl.duration || 0)),
     h(
       "div",
       { class: "metro-row" },
-      h("button", { type: "button", class: "btn", "aria-label": "10 s terug", onclick: () => (a.currentTime = Math.max(0, a.currentTime - 10)) }, "−10s"),
+      h("button", { type: "button", class: "btn", "aria-label": "10 seconden terug", onclick: () => (pl.currentTime = Math.max(0, pl.currentTime - 10)) }, "−10s"),
       play,
-      h("button", { type: "button", class: "btn", "aria-label": "10 s verder", onclick: () => (a.currentTime += 10) }, "+10s"),
+      h("button", { type: "button", class: "btn", "aria-label": "10 seconden verder", onclick: () => (pl.currentTime = pl.currentTime + 10) }, "+10s"),
       speed
     ),
-    h("div", { class: "metro-row" }, h("span", { class: "muted" }, "Herhaal"), loopBtn("A", "loopA"), loopBtn("B", "loopB"))
+    h("div", { class: "metro-row" }, h("span", { class: "muted" }, "Herhaal"), loopBtn("A", "loopA"), loopBtn("B", "loopB")),
+    linkRow
   );
 }
 

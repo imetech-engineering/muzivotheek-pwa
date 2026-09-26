@@ -20,6 +20,7 @@ const ASSETS = [
   "./js/setlists.js",
   "./js/tuner.js",
   "./js/folders.js",
+  "./js/youtube.js",
   "./js/ui.js",
   "./js/update.js",
   "./js/viewer.js",

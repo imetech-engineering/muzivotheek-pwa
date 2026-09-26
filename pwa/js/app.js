@@ -11,6 +11,7 @@ import { Metronome, tempoName } from "./metronome.js";
 import { Tuner } from "./tuner.js";
 import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, fmtDate } from "./ui.js";
 import { icon } from "./icons.js";
+import { parseYouTube, searchUrl } from "./youtube.js";
 import { canLinkFolder, canPickFolderOnce, linkFolder, unlinkFolder, folderSources, syncFolder, syncAllFolders, regrantAndSync, pickFolderOnce } from "./folders.js";
 import { initUpdates, check as checkUpdate, applyUpdate, BUILD } from "./update.js";
 
@@ -285,6 +286,7 @@ async function songMenu(s) {
     { label: "Aan lijst toevoegen", value: "list", icon: icon("list") },
     { label: s.favorite ? "Geen favoriet meer" : "Favoriet", value: "fav", icon: icon("star") },
     { label: "Gegevens bewerken", value: "edit", icon: icon("edit") },
+    { label: s.audioId || s.youtube ? "Opname / YouTube wijzigen" : "Opname of YouTube toevoegen", value: "edit", icon: icon("audio") },
     navigator.canShare ? { label: "Delen", value: "share", icon: icon("share") } : null,
     { label: "Verwijderen", value: "del", icon: icon("trash"), danger: true },
   ].filter(Boolean));
@@ -338,10 +340,17 @@ export async function editSong(id, onSaved) {
       audioLabel.textContent = audioFile.name;
     }
   } });
+  const youtube = h("input", { class: "field", value: s.youtube || "", placeholder: "Plak een YouTube-link", inputmode: "url" });
+  const ytRow = h(
+    "div",
+    { class: "form-row" },
+    h("span", {}, "YouTube"),
+    h("div", { class: "audio-row" }, youtube, h("a", { class: "btn small", href: searchUrl(s), target: "_blank", rel: "noopener", title: "Zoek op YouTube", html: icon("search") }))
+  );
   const audioRow = h(
     "div",
     { class: "form-row" },
-    h("span", {}, "Audio"),
+    h("span", {}, "Opname (mp3)"),
     h("div", { class: "audio-row" }, audioLabel, audioIn,
       h("button", { type: "button", class: "btn small", onclick: () => audioIn.click() }, "Kies"),
       h("button", { type: "button", class: "btn small", onclick: () => { audioState = "remove"; audioFile = null; audioLabel.textContent = "Geen"; } }, "Weg"))
@@ -358,6 +367,7 @@ export async function editSong(id, onSaved) {
     h("div", { class: "form-2" }, f("Toonsoort", key), f("Tempo (bpm)", bpm)),
     f("Notitie", notes),
     audioRow,
+    ytRow,
     h("label", { class: "check-row" }, fav, h("span", {}, "Favoriet"))
   );
   const ok = await dialog({
@@ -369,6 +379,8 @@ export async function editSong(id, onSaved) {
     ],
   });
   if (!ok) return;
+  if (youtube.value.trim() && !parseYouTube(youtube.value)) toast("YouTube-link niet herkend, niet opgeslagen", 3000);
+  else s.youtube = youtube.value.trim();
   s.title = title.value.trim() || s.title;
   s.composer = composer.value.trim();
   s.arranger = arranger.value.trim();

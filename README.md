@@ -18,7 +18,8 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
 - **Bladwijzers en sprongen**: sprong-knopjes op de pagina voor herhalingen/D.S./coda, met *Terug*.
 - **Afspeellijsten**: maken, volgorde slepen, kopiëren; spelen loopt door naar het volgende nummer.
 - **Metronoom** (ook in de lezer, tempo per nummer bewaard) en **stemapparaat** (C/B♭/E♭/F).
-- **Audio bij een nummer** met A-B herhaling en tempo 50-125%.
+- **Meespelen**: opname (mp3) of YouTube-link per nummer, met A-B herhalen, ±10 s en tempo.
+  YouTube via de officiële speler (youtube-nocookie), alleen met internet.
 - **Back-up** als .zip (delen naar Drive/OneDrive) en terugzetten.
 
 ## Structuur
