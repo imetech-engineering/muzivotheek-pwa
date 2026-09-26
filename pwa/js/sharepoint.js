@@ -59,8 +59,19 @@ export function msal() {
   return msalPromise;
 }
 
+// Is er ooit ingelogd? (MSAL bewaart dan gegevens in localStorage.) Zo niet,
+// dan de Microsoft-bibliotheek niet eens laden.
+function everLoggedIn() {
+  try {
+    return Object.keys(localStorage).some((k) => k.startsWith("msal.") || k.includes("login.windows.net") || k.includes("login.microsoftonline"));
+  } catch (e) {
+    return false;
+  }
+}
+
 export async function account() {
   if (!spConfigured()) return null;
+  if (!window.msal && !everLoggedIn()) return null;
   try {
     return (await msal()).getActiveAccount();
   } catch (e) {
