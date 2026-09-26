@@ -1907,3 +1907,73 @@ textarea {
 .paste-btn {
   flex: none;
 }
+
+/* ---------- paginanummer ---------- */
+.v-badge {
+  position: absolute;
+  z-index: 11; /* boven de knoppenbalken, zodat hij altijd te pakken is */
+  transform: translate(-50%, -50%);
+  background: rgba(22, 24, 32, 0.72);
+  color: #fff;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 0.35em 0.6em;
+  border-radius: 999px;
+  touch-action: none;
+  cursor: grab;
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* ---------- meer-paneel ---------- */
+.more-seg button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 56px;
+  font-size: 12px;
+}
+.more-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0;
+}
+.more-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 72px;
+  padding: 6px 4px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+}
+.more-tile.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.more-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 4px 0;
+}
+.more-label {
+  font-weight: 700;
+  color: var(--text-2);
+  min-width: 70px;
+  text-align: center;
+}

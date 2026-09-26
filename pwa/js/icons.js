@@ -48,6 +48,7 @@ const P = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   stamp: '<path d="M5 22h14M5 18h14v-3a2 2 0 0 0-2-2h-2.5l-.5-3a3 3 0 1 0-4 0l-.5 3H7a2 2 0 0 0-2 2z"/>',
+  rotate: '<rect x="8" y="3" width="8" height="18" rx="2"/><path d="M3.5 9A9 9 0 0 1 6 5M20.5 15a9 9 0 0 1-2.5 4"/><path d="M3 5.5V9h3.5M21 18.5V15h-3.5"/>',
   expand: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>',
   repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',

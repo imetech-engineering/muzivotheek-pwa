@@ -120,7 +120,6 @@ export function closeViewer(fromPop = false) {
   root().innerHTML = "";
   document.body.classList.remove("viewing");
   releaseWake();
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (!fromPop) history.back();
   document.dispatchEvent(new CustomEvent("library"));
   document.dispatchEvent(new CustomEvent("viewer-closed"));
@@ -130,9 +129,13 @@ window.addEventListener("popstate", () => {
   if (st.open) closeViewer(true);
 });
 
+// Android toont bij elke aanvraag voor volledig scherm een uitleg-overlay. Daarom:
+// niet aanvragen als de app al volledig scherm draait, en maar één keer per
+// sessie (bij sluiten van een nummer blijft het scherm volledig).
+const appIsFullscreen = () => matchMedia("(display-mode: fullscreen)").matches || !!document.fullscreenElement;
 function enterFullscreen() {
   const el = document.documentElement;
-  if (el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
+  if (el.requestFullscreen && !appIsFullscreen()) el.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
 }
 
 async function requestWake() {
@@ -177,7 +180,7 @@ function buildDom() {
       btn("metronome", "Tempo", () => togglePanel("metro")),
       btn("audio", "Meespelen", () => togglePanel("audio"), "v-audio-btn"),
       btn("scroll", "Scroll", () => toggleAutoScroll()),
-      btn("more", "Meer", () => moreMenu())
+      btn("more", "Meer", () => togglePanel("more"))
     )
   );
 
@@ -196,7 +199,9 @@ function buildDom() {
   const scrollPill = h("div", { class: "v-scrollpill", id: "v-scrollpill", hidden: true });
 
   const ytBox = h("div", { class: "v-yt-box", id: "v-yt-box" }, h("div", { id: "v-yt-frame" }));
-  r.append(stage, flash, top, bottom, tools, panel, ytBox, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
+  const badge = h("div", { class: "v-badge", id: "v-badge", role: "status" });
+  attachBadge(badge);
+  r.append(stage, flash, badge, top, bottom, tools, panel, ytBox, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
   attachGestures(stage);
   let lastSize = "";
   new ResizeObserver(() => {
@@ -628,6 +633,7 @@ function updateChrome() {
   const mode = root().dataset.mode;
   const last = mode === "double" ? Math.min(st.pages, st.page + 1) : st.half ? st.page + 1 : st.page;
   $("#v-count").textContent = (last > st.page ? `${st.page}-${last}` : st.page) + " / " + st.pages;
+  updateBadge($("#v-count").textContent);
   const sl = $("#v-slider");
   sl.max = st.pages;
   sl.value = st.page;
@@ -1380,6 +1386,7 @@ function togglePanel(kind) {
   if (kind === "marks") renderMarks(p);
   if (kind === "metro") renderMetro(p);
   if (kind === "audio") renderAudio(p);
+  if (kind === "more") renderMore(p);
 }
 
 function panelHead(title) {
@@ -1746,69 +1753,127 @@ function stopAutoScroll() {
   if (S().viewMode !== "scroll" && st.open) render();
 }
 
-// ---------- meer-menu ----------
+// ---------- paginanummer in beeld ----------
+//
+// "3 / 8" in een hoek. Slepen = verplaatsen, tikken = groter/kleiner.
 
-async function moreMenu() {
+const BADGE_SIZES = [15, 20, 28, 38];
+
+function updateBadge(text) {
+  const b = $("#v-badge");
+  if (!b) return;
+  b.hidden = !S().pageBadge;
+  b.textContent = text;
+  const pos = S().pageBadgePos || { x: 0.93, y: 0.86 };
+  b.style.left = pos.x * 100 + "%";
+  b.style.top = pos.y * 100 + "%";
+  b.style.fontSize = BADGE_SIZES[S().pageBadgeSize ?? 1] + "px";
+}
+
+function attachBadge(b) {
+  let d = null;
+  b.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    b.setPointerCapture(e.pointerId);
+    d = { x: e.clientX, y: e.clientY, moved: false };
+  });
+  b.addEventListener("pointermove", (e) => {
+    if (!d) return;
+    e.stopPropagation();
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) d.moved = true;
+    if (!d.moved) return;
+    const r = root().getBoundingClientRect();
+    const x = Math.min(0.97, Math.max(0.03, (e.clientX - r.left) / r.width));
+    const y = Math.min(0.97, Math.max(0.03, (e.clientY - r.top) / r.height));
+    b.style.left = x * 100 + "%";
+    b.style.top = y * 100 + "%";
+    d.pos = { x: +x.toFixed(3), y: +y.toFixed(3) };
+  });
+  const end = (e) => {
+    if (!d) return;
+    e.stopPropagation();
+    if (d.moved && d.pos) setSetting("pageBadgePos", d.pos);
+    else if (!d.moved) {
+      // Tikken: volgende maat.
+      setSetting("pageBadgeSize", ((S().pageBadgeSize ?? 1) + 1) % BADGE_SIZES.length);
+      updateBadge(b.textContent);
+    }
+    d = null;
+  };
+  b.addEventListener("pointerup", end);
+  b.addEventListener("pointercancel", end);
+}
+
+// ---------- meer-paneel ----------
+//
+// Compact: weergave als vier knoppen, aan/uit-dingen als tegels, zoom met − en +.
+
+function renderMore(p) {
   const mode = S().viewMode;
-  const v = await menu(st.song.title, [
-    { label: "Eén pagina", value: "single", icon: icon("single"), active: mode === "single" },
-    { label: "Twee pagina's naast elkaar", value: "double", icon: icon("double"), active: mode === "double" },
-    { label: "Automatisch (liggend = twee)", value: "auto", icon: icon("expand"), active: mode === "auto" },
-    { label: "Doorlopend scrollen", value: "scroll", icon: icon("vertical"), active: mode === "scroll" },
-    { label: "Halve pagina omslaan", value: "half", icon: icon("half"), active: S().halfTurn },
-    S().halfTurn ? { label: S().halfOrder === "nextTop" ? "Halve pagina: volgende boven" : "Halve pagina: huidige boven", value: "halforder", icon: icon("repeat") } : null,
-    { label: "Witte randen wegsnijden", value: "crop", icon: icon("crop"), active: S().autoCrop },
-    { label: "Nachtstand (wit op zwart)", value: "night", icon: icon("moon"), active: S().nightSheet },
-    { label: "Krabbels tonen", value: "notes", icon: icon("pen"), active: S().showNotes },
-    { label: "Groter", value: "zin", icon: icon("zoomIn") },
-    { label: "Kleiner", value: "zout", icon: icon("zoomOut") },
-    { label: "Naar pagina…", value: "goto", icon: icon("right") },
-    { label: "Volledig scherm", value: "fs", icon: icon("expand") },
-    { label: "Gegevens bewerken", value: "edit", icon: icon("edit") },
-  ].filter(Boolean));
-  if (!v) return;
-  if (["single", "double", "auto", "scroll"].includes(v)) {
-    setSetting("viewMode", v);
+  const redraw = () => renderMore(p);
+  const tile = (ic, label, on, onclick) =>
+    h("button", { type: "button", class: "more-tile" + (on ? " on" : ""), "aria-pressed": on ? "true" : "false", onclick, html: icon(ic) + `<span>${label}</span>` });
+  const setMode = (m) => {
+    setSetting("viewMode", m);
     cam.z = 1;
     st.half = false;
-  } else if (v === "half") {
+    if (m !== "single" && m !== "auto") setSetting("halfTurn", false);
+    render();
+    redraw();
+  };
+  const modes = h(
+    "div",
+    { class: "seg more-seg" },
+    [["single", "single", "1"], ["double", "double", "2"], ["auto", "rotate", "Auto"], ["scroll", "vertical", "Scroll"]].map(([m, ic, l]) =>
+      h("button", { type: "button", class: mode === m ? "on" : "", "aria-label": l, onclick: () => setMode(m), html: icon(ic) + `<span>${l}</span>` })
+    )
+  );
+  const toggleHalf = () => {
     const on = !S().halfTurn;
     setSetting("halfTurn", on);
     st.half = false;
     if (on) {
-      // Halve pagina werkt alleen met één pagina tegelijk: daarheen schakelen.
       if (effectiveMode() !== "single") setSetting("viewMode", "single");
       cam.z = 1;
-      // Meteen laten zien hoe het eruitziet (als er nog een volgende pagina is).
       if (st.page < st.pages) st.half = true;
-      toast(st.page < st.pages ? "Halve pagina aan: tik verder voor de rest" : "Halve pagina aan (dit is de laatste pagina)", 2500);
-    } else toast("Halve pagina uit", 1500);
-  } else if (v === "halforder") {
-    setSetting("halfOrder", S().halfOrder === "nextTop" ? "curTop" : "nextTop");
-    if (st.page < st.pages) st.half = true;
-  }
-  else if (v === "crop") {
-    setSetting("autoCrop", !S().autoCrop);
-    st.cache.clear();
-  } else if (v === "night") setSetting("nightSheet", !S().nightSheet);
-  else if (v === "notes") {
-    setSetting("showNotes", !S().showNotes);
-    document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk);
-    return;
-  } else if (v === "zin") return zoomCenter(1.25);
-  else if (v === "zout") return zoomCenter(1 / 1.25);
-  else if (v === "goto") {
-    const n = await promptDlg(`Naar pagina (1-${st.pages})`, "", { type: "number" });
-    if (n) goto(parseInt(n, 10));
-    return;
-  } else if (v === "fs") {
-    document.fullscreenElement ? document.exitFullscreen().catch(() => {}) : enterFullscreen();
-    return;
-  } else if (v === "edit") {
-    document.dispatchEvent(new CustomEvent("edit-song", { detail: { id: st.song.id, onSaved: async () => { st.song = await getSong(st.song.id); updateChrome(); setupAudio(); } } }));
-    return;
-  }
-  render();
+    }
+    render();
+    redraw();
+  };
+  const tiles = h(
+    "div",
+    { class: "more-grid" },
+    tile("half", "Halve pagina", S().halfTurn, toggleHalf),
+    S().halfTurn ? tile("repeat", "Helften wisselen", false, () => { setSetting("halfOrder", S().halfOrder === "nextTop" ? "curTop" : "nextTop"); if (st.page < st.pages) st.half = true; render(); }) : null,
+    tile("info", "Pagina­nummer", S().pageBadge, () => { setSetting("pageBadge", !S().pageBadge); updateBadge($("#v-count").textContent); if (S().pageBadge) toast("Sleep om te verplaatsen, tik voor groter", 2500); redraw(); }),
+    tile("crop", "Randen weg", S().autoCrop, () => { setSetting("autoCrop", !S().autoCrop); st.cache.clear(); render(); redraw(); }),
+    tile("moon", "Nacht", S().nightSheet, () => { setSetting("nightSheet", !S().nightSheet); render(); redraw(); }),
+    tile("pen", "Krabbels", S().showNotes, () => { setSetting("showNotes", !S().showNotes); document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk); redraw(); })
+  );
+  const zoom = h(
+    "div",
+    { class: "more-row" },
+    h("button", { type: "button", class: "round", "aria-label": "Kleiner", onclick: () => zoomCenter(1 / 1.25) }, "−"),
+    h("span", { class: "more-label" }, "Grootte"),
+    h("button", { type: "button", class: "round", "aria-label": "Groter", onclick: () => zoomCenter(1.25) }, "+")
+  );
+  const actions = h(
+    "div",
+    { class: "more-grid" },
+    tile("right", "Naar pagina", false, async () => {
+      const n = await promptDlg(`Naar pagina (1-${st.pages})`, "", { type: "number" });
+      if (n) goto(parseInt(n, 10));
+    }),
+    tile("expand", "Volledig scherm", appIsFullscreen(), () => {
+      document.fullscreenElement ? document.exitFullscreen().catch(() => {}) : enterFullscreen();
+      setTimeout(redraw, 400);
+    }),
+    tile("edit", "Gegevens", false, () => {
+      closePanels();
+      document.dispatchEvent(new CustomEvent("edit-song", { detail: { id: st.song.id, onSaved: async () => { st.song = await getSong(st.song.id); updateChrome(); setupAudio(); } } }));
+    })
+  );
+  fill(p, panelHead("Weergave"), modes, tiles, zoom, actions);
 }
 
 export const viewerOpen = () => st.open;

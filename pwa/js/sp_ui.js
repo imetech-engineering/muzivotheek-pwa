@@ -364,7 +364,7 @@ export async function spSettings(rerender, group) {
     );
   }
   rows.push(
-    h("p", { class: "set-s pad-x" }, "Plak de link van een gedeelde SharePoint-map. Bij een link 'Iedereen met de link' is geen account nodig. De muziek blijft daarna ook zonder internet op dit apparaat."),
+    h("p", { class: "set-s pad-x" }, "Plak de link van een gedeelde map."),
     h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", onclick: async () => { const s = await askLink(); if (s) { rerender(); browse(s); } }, html: icon("link") + "<span>SharePoint-map koppelen</span>" }))
   );
   return group("SharePoint", ...rows);

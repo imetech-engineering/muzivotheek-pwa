@@ -20,6 +20,9 @@ export const DEFAULTS = {
   halfOrder: "curTop", // curTop: boven = rest van deze pagina, onder = begin volgende | nextTop: andersom
   stampSize: 2, // index in STAMP_SIZES
   showNotes: true,
+  pageBadge: true, // paginanummer "3 / 8" in beeld
+  pageBadgeSize: 1,
+  pageBadgePos: { x: 0.93, y: 0.86 },
   penColor: "#e11d48",
   penWidth: 3,
   scrollSpeed: 30, // pixels per seconde bij auto-scroll

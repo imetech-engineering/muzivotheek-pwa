@@ -995,21 +995,22 @@ async function renderSettings() {
     group(
       "Weergave",
       select("theme", "Thema", [["auto", "Automatisch"], ["light", "Licht"], ["dark", "Donker"]]),
-      select("viewMode", "Bladmuziek tonen", [["single", "Eén pagina"], ["double", "Twee pagina's"], ["auto", "Automatisch (liggend = twee)"], ["scroll", "Doorlopend scrollen"]]),
-      toggle("halfTurn", "Halve pagina omslaan", "Eerst een halve pagina verder, dan de hele (bij één pagina)"),
-      select("halfOrder", "Halve pagina: volgorde", [["curTop", "Boven: rest van deze pagina"], ["nextTop", "Boven: begin volgende pagina"]]),
-      toggle("autoCrop", "Witte randen wegsnijden", "Muziek wordt groter"),
-      toggle("nightSheet", "Nachtstand", "Wit op zwart, fijn op een donker podium"),
-      toggle("fullscreen", "Volledig scherm bij openen"),
+      select("viewMode", "Weergave", [["single", "1 pagina"], ["double", "2 pagina's"], ["auto", "Automatisch"], ["scroll", "Scrollen"]]),
+      toggle("halfTurn", "Halve pagina omslaan"),
+      select("halfOrder", "Halve pagina boven", [["curTop", "Deze pagina"], ["nextTop", "Volgende"]]),
+      toggle("autoCrop", "Witte randen weg"),
+      toggle("nightSheet", "Nachtstand", "Wit op zwart"),
+      toggle("pageBadge", "Paginanummer", "Slepen of tikken voor groter"),
+      toggle("fullscreen", "Volledig scherm"),
       toggle("keepAwake", "Scherm blijft aan")
     ),
     group(
       "Omslaan",
-      toggle("tapZones", "Tikken aan de zijkant", "Rechts = verder, links = terug"),
-      toggle("tapLeftPrev", "Links tikken = terug", "Uit: beide kanten gaan verder"),
+      toggle("tapZones", "Tikken aan de zijkant"),
+      toggle("tapLeftPrev", "Links = terug"),
       toggle("swipe", "Vegen"),
-      toggle("pedalSwap", "Pedaal omdraaien", "Voor een bluetooth-pedaal dat andersom werkt"),
-      select("scrollSpeed", "Snelheid auto-scroll", [[10, "Heel langzaam"], [20, "Langzaam"], [30, "Normaal"], [50, "Snel"], [80, "Heel snel"]], Number)
+      toggle("pedalSwap", "Pedaal omdraaien"),
+      select("scrollSpeed", "Scrollsnelheid", [[10, "Heel langzaam"], [20, "Langzaam"], [30, "Normaal"], [50, "Snel"], [80, "Heel snel"]], Number)
     ),
     group(
       "Krabbels",
@@ -1019,7 +1020,7 @@ async function renderSettings() {
     group(
       "Metronoom & stemmen",
       toggle("metroSound", "Klik-geluid"),
-      toggle("metroFlash", "Flits in beeld", "Rand knippert op de tel"),
+      toggle("metroFlash", "Flits op de tel"),
       toggle("metroAccent", "Eerste tel harder"),
       select("tunerRef", "Stemtoon A", [[438, "438 Hz"], [440, "440 Hz"], [441, "441 Hz"], [442, "442 Hz"], [443, "443 Hz"]], Number)
     ),
@@ -1053,7 +1054,7 @@ async function renderSettings() {
               )
             )
           ),
-          h("p", { class: "set-s pad-x" }, "Nieuwe en gewijzigde PDF's in deze mappen komen er bij het openen van de app vanzelf bij. Een submap wordt een Map in de bibliotheek."),
+          h("p", { class: "set-s pad-x" }, "Nieuwe PDF's komen er vanzelf bij."),
           canLinkFolder()
             ? h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", onclick: async () => { try { const src = await linkFolder(); await runFolderSync(() => syncFolder(src, progressText), `Map "${src.name}" gekoppeld`); renderSettings(); } catch (e) { if (e.name !== "AbortError") toast("Map koppelen mislukt"); } }, html: icon("folder") + "<span>Map koppelen</span>" }))
             : null
@@ -1062,7 +1063,7 @@ async function renderSettings() {
     group(
       "Opslag & back-up",
       h("div", { class: "set-row" }, h("div", {}, h("div", { class: "set-l" }, `${songs.length} ${songs.length === 1 ? "nummer" : "nummers"}, ${lists.length} ${lists.length === 1 ? "lijst" : "lijsten"}`), h("div", { class: "set-s" }, est ? `${fmtBytes(est.usage)} gebruikt` + (persisted ? " · vastgezet ✓" : "") : ""))),
-      h("p", { class: "set-s pad-x" }, "Alles staat alleen op dit apparaat. Maak af en toe een back-up, bijvoorbeeld naar je Drive of OneDrive."),
+      h("p", { class: "set-s pad-x" }, "Alles staat alleen op dit apparaat. Maak af en toe een back-up."),
       h(
         "div",
         { class: "btn-row" },
