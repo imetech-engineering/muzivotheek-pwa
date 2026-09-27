@@ -16,6 +16,23 @@ alleen `*.sharepoint.com`, alleen verzoeken vanaf de Muzivotheek-app.
 4. Kopieer het adres bovenin, bijvoorbeeld `https://muzivotheek.<jouwnaam>.workers.dev`,
    en zet het in `pwa/config.js` bij `proxyUrl`.
 
+## Automatisch bijwerken vanuit GitHub (aanrader)
+
+Dan hoef je nooit meer code te plakken: elke wijziging in `worker/` wordt vanzelf
+gepubliceerd.
+
+1. Cloudflare: rechtsboven je profiel → **Profile** → **API Tokens** → **Create Token** →
+   bij *Edit Cloudflare Workers* op **Use template** → **Continue to summary** →
+   **Create Token**. Kopieer de sleutel.
+2. GitHub: repo → **Settings** → **Secrets and variables** → **Actions** →
+   **New repository secret**. Naam: `CLOUDFLARE_API_TOKEN`, waarde: de sleutel → **Add secret**.
+
+## Code plakken (handmatig)
+
+Plak [`dist/muzivotheek-worker.min.js`](https://raw.githubusercontent.com/imetech-engineering/muzivotheek-pwa/main/worker/dist/muzivotheek-worker.min.js)
+(één regel, korter en makkelijker te kopiëren dan de leesbare versie).
+Na elke wijziging aan `sharepoint-proxy.js`: `npx esbuild sharepoint-proxy.js --minify --format=esm --outfile=dist/muzivotheek-worker.min.js`.
+
 ## Link testen
 
 Open in een browser:

@@ -1,0 +1,36 @@
+# Zet de tussenservice (worker/) automatisch op Cloudflare bij elke wijziging.
+# Eenmalig nodig: repo-secret CLOUDFLARE_API_TOKEN (zie worker/README.md).
+
+name: Deploy tussenservice
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy-worker.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is de Cloudflare-sleutel ingesteld?
+        id: token
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "Geen CLOUDFLARE_API_TOKEN ingesteld: overslaan."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publiceren naar Cloudflare
+        if: steps.token.outputs.ok == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 2fab76014bf4b076e385a8300df03002
+          workingDirectory: worker
