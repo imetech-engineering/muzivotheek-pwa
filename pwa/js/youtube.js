@@ -140,7 +140,7 @@ export async function pickYouTube(song) {
     return null;
   }
   let chosen = null;
-  const q = h("input", { class: "field", type: "search", value: [song.title, song.composer].filter(Boolean).join(" "), enterkeyhint: "search" });
+  const q = h("input", { class: "field", type: "search", value: [song.title, song.composer || song.arranger].filter(Boolean).join(" "), enterkeyhint: "search" });
   const list = h("div", { class: "yt-results" });
   let seq = 0;
   const run = async () => {

@@ -20,6 +20,7 @@ export const DEFAULTS = {
   halfOrder: "curTop", // curTop: boven = rest van deze pagina, onder = begin volgende | nextTop: andersom
   stampSize: 2, // index in STAMP_SIZES
   showNotes: true,
+  autoRecognize: true, // titel/componist uit het blad herkennen (PDF-tekst, anders OCR)
   pageBadge: true, // paginanummer "3 / 8" in beeld
   pageBadgeSize: 1,
   pageBadgePos: { x: 0.93, y: 0.86 },

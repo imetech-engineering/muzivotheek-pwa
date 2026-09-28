@@ -230,7 +230,8 @@ export async function listChildren(src, itemId, tok) {
   throw lastErr;
 }
 
-export const isPdf = (it) => it.file && /\.pdf$/i.test(it.name);
+// PDF's en foto's (foto's worden bij importeren een PDF).
+export const isPdf = (it) => it.file && /\.(pdf|jpe?g|png)$/i.test(it.name);
 
 // Alle PDF's onder een map, met pad (voor zoeken en volgen).
 export async function listAll(src, itemId, tok, path = [], onProgress) {
@@ -247,7 +248,8 @@ export async function listAll(src, itemId, tok, path = [], onProgress) {
 async function download(src, itemId, tok) {
   if (src.via === "proxy") {
     const r = await proxy("file", { link: src.link, path: itemId });
-    return new File([await r.blob()], itemId.split("/").pop(), { type: "application/pdf" });
+    const name = itemId.split("/").pop();
+    return new File([await r.blob()], name, { type: /\.pdf$/i.test(name) ? "application/pdf" : "image/jpeg" });
   }
   const meta = await graph(`/drives/${src.driveId}/items/${itemId}?$select=id,name,@microsoft.graph.downloadUrl`, tok).catch(() =>
     graph(`/shares/${src.sid}/items/${itemId}?$select=id,name,@microsoft.graph.downloadUrl`, tok)
@@ -257,7 +259,7 @@ async function download(src, itemId, tok) {
   const r = url ? await fetch(url) : await fetch(`${GRAPH}/drives/${src.driveId}/items/${itemId}/content`, { headers: { Authorization: "Bearer " + tok } });
   if (!r.ok) throw new Error("Downloaden mislukt (" + r.status + ")");
   const blob = await r.blob();
-  return new File([blob], meta.name, { type: "application/pdf" });
+  return new File([blob], meta.name, { type: /\.pdf$/i.test(meta.name) ? "application/pdf" : "image/jpeg" });
 }
 
 // ---------- bronnen (gekoppelde SharePoint-mappen) ----------

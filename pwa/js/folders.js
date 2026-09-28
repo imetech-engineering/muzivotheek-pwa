@@ -28,7 +28,7 @@ export async function unlinkFolder(id) {
 async function* walk(dir, path = []) {
   for await (const entry of dir.values()) {
     if (entry.kind === "directory") yield* walk(entry, [...path, entry.name]);
-    else if (/\.pdf$/i.test(entry.name)) yield { entry, path };
+    else if (/\.(pdf|jpe?g|png)$/i.test(entry.name)) yield { entry, path };
   }
 }
 
@@ -104,7 +104,7 @@ export function pickFolderOnce() {
     input.hidden = true;
     input.onchange = () => {
       const files = [...input.files]
-        .filter((f) => /\.pdf$/i.test(f.name))
+        .filter((f) => /\.(pdf|jpe?g|png)$/i.test(f.name))
         .map((f) => {
           const parts = (f.webkitRelativePath || f.name).split("/");
           // parts[0] is de gekozen map zelf; de eerste submap wordt de "Map".

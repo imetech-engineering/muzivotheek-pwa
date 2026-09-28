@@ -2,6 +2,9 @@
 
 import { db, uid } from "./db.js";
 import { loadPdf, makeThumb } from "./pdf.js";
+import { parseFileName, isGarbageName } from "./names.js";
+import { imagesToPdf, isImageFile } from "./imgpdf.js";
+import { queueRecognize } from "./recognize.js";
 
 let songs = null; // cache: Map id -> song
 
@@ -31,28 +34,44 @@ export async function saveSong(song) {
 
 export function titleFromFilename(name) {
   return name
-    .replace(/\.pdf$/i, "")
+    .replace(/\.(pdf|jpe?g|png|webp|heic|heif)$/i, "")
     .replace(/[_]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+// Foto's worden eerst een PDF (één pagina per foto).
+async function asPdf(file) {
+  if (Array.isArray(file)) return imagesToPdf(file);
+  if (isImageFile(file) && !/pdf/i.test(file.type || "")) return imagesToPdf([file]);
+  return file instanceof Blob ? file : new Blob([file], { type: "application/pdf" });
+}
+
 // Importeer één PDF. Geeft het nieuwe nummer terug, of null als het al bestaat.
+// file: PDF, foto, of een lijst foto's (samen één nummer; extra.name geeft de naam).
 export async function importPdf(file, extra = {}) {
   await allSongs();
-  const title = titleFromFilename(file.name || "Naamloos");
-  const dup = [...songs.values()].find((s) => (extra.src && s.src === extra.src) || (s.fileName === file.name && s.fileSize === file.size));
+  const first = Array.isArray(file) ? file[0] : file;
+  const fileName = extra.name || first.name || "Naamloos";
+  const size = Array.isArray(file) ? file.reduce((n, f) => n + f.size, 0) : file.size;
+  const dup = [...songs.values()].find((s) => (extra.src && s.src === extra.src) || (s.fileName === fileName && s.fileSize === size));
   if (dup) return { song: dup, duplicate: true };
 
-  const blob = file instanceof Blob ? file : new Blob([file], { type: "application/pdf" });
+  // Titel, componist, arrangeur en partij uit de bestandsnaam.
+  const parsed = parseFileName(fileName, { strictNumber: !extra.numbered });
+  const garbage = !parsed.title;
+  const title = parsed.title || titleFromFilename(fileName) || "Naamloos";
+
+  const blob = await asPdf(file);
   const doc = await loadPdf(blob);
   const id = uid();
   const thumb = await makeThumb(doc).catch(() => null);
   const song = {
     id,
-    title,
-    composer: "",
-    arranger: "",
+    title: garbage && isGarbageName(titleFromFilename(fileName)) ? (extra.fallbackTitle || title) : title,
+    composer: parsed.composer,
+    arranger: parsed.arranger,
+    part: parsed.part,
     folder: extra.folder || "",
     genre: "",
     key: "",
@@ -62,8 +81,8 @@ export async function importPdf(file, extra = {}) {
     notes: "",
     favorite: false,
     pages: doc.numPages,
-    fileName: file.name || "",
-    fileSize: file.size || 0,
+    fileName,
+    fileSize: size || 0,
     added: Date.now(),
     opened: 0,
     played: 0,
@@ -72,17 +91,21 @@ export async function importPdf(file, extra = {}) {
     audioId: null,
     src: extra.src || null, // herkomst (gekoppelde map), om later wijzigingen te zien
     srcVersion: extra.srcVersion || null,
+    // Welke velden de app zelf invulde (die mag herkenning nog verbeteren).
+    auto: { title: true, titleGarbage: garbage, composer: !parsed.composer, arranger: !parsed.arranger },
   };
   doc.destroy();
   await db.put("files", id, blob);
   if (thumb) await db.put("thumbs", id, thumb);
   await saveSong(song);
+  // Op de achtergrond titel/componist uit het blad halen.
+  queueRecognize(id);
   return { song, duplicate: false };
 }
 
 // Nieuwe versie van de PDF uit de bron: bestand vervangen, gegevens en krabbels houden.
 export async function replaceFile(song, file, srcVersion) {
-  const blob = file instanceof Blob ? file : new Blob([file], { type: "application/pdf" });
+  const blob = await asPdf(file);
   const doc = await loadPdf(blob);
   const thumb = await makeThumb(doc).catch(() => null);
   song.pages = doc.numPages;
@@ -150,7 +173,7 @@ export function sortSongs(list, sort, desc) {
 
 export function matches(song, q) {
   if (!q) return true;
-  const hay = [song.title, song.composer, song.arranger, song.folder, song.genre, song.key, (song.tags || []).join(" ")]
+  const hay = [song.title, song.composer, song.arranger, song.part, song.folder, song.genre, song.key, (song.tags || []).join(" ")]
     .join(" ")
     .toLowerCase();
   return q

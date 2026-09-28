@@ -5,6 +5,10 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
 
 ## Functies
 
+- **Herkennen**: titel, componist, arrangeur en partij uit de bestandsnaam ("01 Titel - Componist - 2e Cornet"),
+  daarna uit de tekst in de PDF, en bij scans/foto's met OCR (tesseract.js, in de browser, eenmalig ± 9 MB,
+  daarna offline). Zelf ingevulde velden worden nooit overschreven.
+- **Foto's** (JPG/PNG) worden bij het toevoegen een PDF; meerdere foto's kunnen samen één nummer worden.
 - **Bibliotheek**: PDF's toevoegen (kiezen, slepen, *Delen → Muzivotheek* vanuit WhatsApp/mail, of een
   hele map; op de computer blijft een gekoppelde map automatisch bijgewerkt, submap = Map),
   zoeken, sorteren (titel, componist, map, nieuwste, laatst geopend, meest gespeeld),

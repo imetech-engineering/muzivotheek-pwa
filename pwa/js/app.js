@@ -12,6 +12,8 @@ import { Tuner } from "./tuner.js";
 import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, fmtDate } from "./ui.js";
 import { icon } from "./icons.js";
 import { parseYouTube, pickYouTube } from "./youtube.js";
+import { isImageFile, isPdfFile } from "./imgpdf.js";
+import { recognizeSong, queueRecognize } from "./recognize.js";
 import { canLinkFolder, canPickFolderOnce, linkFolder, unlinkFolder, folderSources, syncFolder, syncAllFolders, regrantAndSync, pickFolderOnce } from "./folders.js";
 import { openSharePoint, openSharePointWithLink, fixBrokenLinks, resumeAfterRedirect, spSettings } from "./sp_ui.js";
 import { spConfigured, syncAllSharePoint } from "./sharepoint.js";
@@ -210,7 +212,7 @@ async function renderSongs() {
 function songRow(s, grid) {
   const img = h("img", { class: "thumb", alt: "", loading: "lazy" });
   thumbUrl(s.id).then((u) => u && (img.src = u));
-  const sub = [s.composer, s.key, s.bpm ? s.bpm + " bpm" : null, `${s.pages} p.`].filter(Boolean).join(" · ");
+  const sub = [s.composer, s.part, s.key, s.bpm ? s.bpm + " bpm" : null, `${s.pages} p.`].filter(Boolean).join(" · ");
   const more = h("button", {
     type: "button",
     class: "row-more",
@@ -338,6 +340,32 @@ export async function editSong(id, onSaved) {
   const title = h("input", { class: "field", value: s.title });
   const composer = h("input", { class: "field", value: s.composer || "", placeholder: "bijv. Jacob de Haan" });
   const arranger = h("input", { class: "field", value: s.arranger || "" });
+  const part = h("input", { class: "field", value: s.part || "", placeholder: "bijv. 2e Cornet" });
+  const recogBtn = h("button", {
+    type: "button",
+    class: "btn small",
+    onclick: async () => {
+      recogBtn.disabled = true;
+      recogBtn.textContent = "Bezig…";
+      try {
+        // Tijdelijk: velden die nu leeg zijn mag de herkenning invullen.
+        const cur = await getSong(id);
+        cur.auto = { ...(cur.auto || {}), composer: !composer.value.trim(), arranger: !arranger.value.trim() };
+        await saveSong(cur);
+        await recognizeSong(id);
+        const r = await getSong(id);
+        if (!composer.value.trim() && r.composer) composer.value = r.composer;
+        if (!arranger.value.trim() && r.arranger) arranger.value = r.arranger;
+        if (!part.value.trim() && r.part) part.value = r.part;
+        if (r.auto && r.auto.title && r.title !== title.value && (!title.value.trim() || s.auto?.titleGarbage)) title.value = r.title;
+        toast(r.composer || r.arranger ? "Herkend" : "Niets gevonden in het blad", 2000);
+      } catch (e) {
+        toast("Herkennen lukte niet", 2500);
+      }
+      recogBtn.disabled = false;
+      recogBtn.textContent = "Herken uit blad";
+    },
+  }, "Herken uit blad");
   const folder = h("input", { class: "field", value: s.folder || "", list: "dl-folders", placeholder: "bijv. Concert, Marsen, Kerst" });
   const dl = h("datalist", { id: "dl-folders" }, fl.map((x) => h("option", { value: x })));
   const key = h("select", { class: "field" }, KEYS.map((k) => h("option", { value: k, selected: (s.key || "") === k }, k || "—")));
@@ -378,6 +406,8 @@ export async function editSong(id, onSaved) {
     f("Titel", title),
     f("Componist", composer),
     f("Arrangeur", arranger),
+    f("Partij", part),
+    h("div", { class: "recog-row" }, recogBtn),
     f("Map", folder),
     dl,
     h("div", { class: "form-2" }, f("Toonsoort", key), f("Tempo (bpm)", bpm)),
@@ -397,9 +427,18 @@ export async function editSong(id, onSaved) {
   if (!ok) return;
   if (youtube.value.trim() && !parseYouTube(youtube.value)) toast("YouTube-link niet herkend, niet opgeslagen", 3000);
   else s.youtube = youtube.value.trim();
+  // Wat je zelf aanpast, laat de herkenning voortaan met rust.
+  const fresh = (await getSong(id)) || s;
+  const auto = { ...(fresh.auto || {}) };
+  if ((title.value.trim() || s.title) !== fresh.title) auto.title = false;
+  if (composer.value.trim() !== (fresh.composer || "")) auto.composer = false;
+  if (arranger.value.trim() !== (fresh.arranger || "")) auto.arranger = false;
+  if (title.value.trim()) auto.titleGarbage = false;
+  s.auto = auto;
   s.title = title.value.trim() || s.title;
   s.composer = composer.value.trim();
   s.arranger = arranger.value.trim();
+  s.part = part.value.trim();
   s.folder = folder.value.trim();
   s.key = key.value;
   s.bpm = Math.max(0, Math.min(300, parseInt(bpm.value, 10) || 0));
@@ -463,7 +502,7 @@ async function runFolderSync(fn, doneLabel = "") {
 }
 
 function pickFiles() {
-  const input = h("input", { type: "file", accept: "application/pdf,.pdf", multiple: true, hidden: true });
+  const input = h("input", { type: "file", accept: "application/pdf,.pdf,image/*,.jpg,.jpeg,.png", multiple: true, hidden: true });
   input.onchange = () => importFiles([...input.files]);
   document.body.append(input);
   input.click();
@@ -473,10 +512,29 @@ function pickFiles() {
 // files: File[] of [{file, folder}] (map importeren).
 async function importFiles(files) {
   let items = files.map((f) => (f instanceof Blob ? { file: f, folder: null } : f));
-  items = items.filter(({ file: f }) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
-  if (!items.length) return toast("Geen PDF-bestanden gevonden");
+  items = items.filter(({ file: f }) => isPdfFile(f) || isImageFile(f));
+  if (!items.length) return toast("Kies PDF's of foto's");
   let defFolder = "";
   if (items.length > 1 && state.filter && state.filter !== "★") defFolder = state.filter;
+  // Meerdere foto's: één nummer met meerdere pagina's, of elke foto apart?
+  const photos = items.filter(({ file: f }) => isImageFile(f) && !isPdfFile(f));
+  if (photos.length > 1) {
+    const how = await menu(`${photos.length} foto's`, [
+      { label: "Eén nummer (meerdere pagina's)", value: "one", icon: icon("copy") },
+      { label: "Elke foto apart", value: "each", icon: icon("grid") },
+    ]);
+    if (!how) return;
+    if (how === "one") {
+      // Op naam sorteren, zodat pagina 1, 2, 3 in de goede volgorde staan.
+      const sorted = photos.map((p) => p.file).sort((a, b) => a.name.localeCompare(b.name, "nl", { numeric: true }));
+      const name = await promptDlg("Naam van het nummer", "", { placeholder: "Leeg = automatisch herkennen" });
+      if (name == null) return;
+      items = items.filter((it) => !photos.includes(it));
+      items.unshift({ file: sorted, folder: photos[0].folder, name: name ? name + ".jpg" : sorted[0].name });
+    }
+  }
+  // Zelfde soort voorloopnummers bij meerdere bestanden ("01 ...", "02 ...")? Dan zijn het volgnummers.
+  const numbered = items.filter((it) => /^\s*\d{1,3}\s/.test((it.name || it.file.name || "").toString())).length >= 2;
   files = items;
   let ok = 0;
   let dup = 0;
@@ -487,7 +545,7 @@ async function importFiles(files) {
     prog.querySelector("span").textContent = `Toevoegen ${i + 1} van ${files.length}…`;
     prog.querySelector("i").style.width = ((i + 0.5) / files.length) * 100 + "%";
     try {
-      const r = await importPdf(files[i].file, { folder: files[i].folder ?? defFolder });
+      const r = await importPdf(files[i].file, { folder: files[i].folder ?? defFolder, name: files[i].name, numbered });
       r.duplicate ? dup++ : ok++;
     } catch (e) {
       console.error(e);
@@ -533,7 +591,8 @@ async function importShared() {
     for (const r of reqs) {
       const res = await cache.match(r);
       const name = decodeURIComponent(res.headers.get("x-name") || "gedeeld.pdf");
-      files.push(new File([await res.blob()], name, { type: "application/pdf" }));
+      const b = await res.blob();
+      files.push(new File([b], name, { type: b.type || (/\.pdf$/i.test(name) ? "application/pdf" : "image/jpeg") }));
       await cache.delete(r);
     }
     if (files.length) await importFiles(files);
@@ -1013,6 +1072,25 @@ async function renderSettings() {
       select("scrollSpeed", "Scrollsnelheid", [[10, "Heel langzaam"], [20, "Langzaam"], [30, "Normaal"], [50, "Snel"], [80, "Heel snel"]], Number)
     ),
     group(
+      "Herkennen",
+      toggle("autoRecognize", "Titel en componist herkennen", "Uit de PDF, anders met tekstherkenning"),
+      h(
+        "div",
+        { class: "btn-row" },
+        h("button", {
+          type: "button",
+          class: "btn",
+          onclick: async () => {
+            const all = await allSongs();
+            const todo = all.filter((x) => !x.composer || (x.auto && x.auto.titleGarbage));
+            if (!todo.length) return toast("Alle nummers hebben al een componist", 2500);
+            todo.forEach((x) => queueRecognize(x.id, { force: true }));
+            toast(`${todo.length} nummers worden op de achtergrond herkend`, 3000);
+          },
+        }, "Herken voor alle nummers")
+      )
+    ),
+    group(
       "Krabbels",
       toggle("showNotes", "Krabbels tonen"),
       select("penWidth", "Pendikte", [[2, "Dun"], [3, "Normaal"], [6, "Dik"]], Number)
@@ -1217,6 +1295,11 @@ function init() {
     if (state.tab === "songs") renderSongs();
     if (state.tab === "lists") renderLists();
   });
+  document.addEventListener("recognized", (e) => {
+    const d = e.detail;
+    if (d.composer && d.changed.includes("componist")) toast(`${d.title}: ${d.composer}`, 2200);
+    if (!viewerOpen() && state.tab === "songs") renderSongs();
+  });
   document.addEventListener("setlists", () => state.tab === "lists" && !viewerOpen() && renderLists());
   setTab("songs");
   importShared();
@@ -1226,7 +1309,11 @@ function init() {
     history.replaceState(null, "", location.pathname);
     setTimeout(() => openSharePointWithLink(sharedLink), 300);
   }
-  allSongs().then((s) => s.length && persistStorage());
+  allSongs().then((s) => {
+    if (s.length) persistStorage();
+    // Foto's/scans zonder herkende titel (bv. eerder zonder internet): nog eens proberen.
+    if (navigator.onLine) s.filter((x) => x.auto && x.auto.titleGarbage).slice(0, 20).forEach((x) => queueRecognize(x.id));
+  });
   // Terug van inloggen bij Microsoft? Dan daar verder. Daarna SharePoint-mappen stil bijwerken.
   resumeAfterRedirect()
     .then(() => syncAllSharePoint())

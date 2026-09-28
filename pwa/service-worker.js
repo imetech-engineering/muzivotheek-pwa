@@ -21,6 +21,9 @@ const ASSETS = [
   "./js/tuner.js",
   "./js/folders.js",
   "./js/youtube.js",
+  "./js/names.js",
+  "./js/imgpdf.js",
+  "./js/recognize.js",
   "./js/sharepoint.js",
   "./js/sp_ui.js",
   "./config.js",
@@ -86,6 +89,21 @@ self.addEventListener("fetch", (event) => {
         }
         return Response.redirect("./?shared=1", 303);
       })()
+    );
+    return;
+  }
+
+  // Tekstherkenning (tesseract) van jsDelivr: na de eerste keer uit de cache, dus ook offline.
+  // Vaste versie in de URL, dus veilig om te bewaren; overleeft app-updates.
+  if (event.request.method === "GET" && url.hostname === "cdn.jsdelivr.net" && /tesseract/.test(url.pathname)) {
+    event.respondWith(
+      caches.open("muzi-ocr-v1").then(async (c) => {
+        const hit = await c.match(event.request);
+        if (hit) return hit;
+        const res = await fetch(event.request);
+        if (res.ok) c.put(event.request, res.clone());
+        return res;
+      })
     );
     return;
   }
