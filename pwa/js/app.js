@@ -1,7 +1,7 @@
 // Muzivotheek: hoofdscherm met tabbladen Nummers, Lijsten, Tools, Instellingen.
 
 import { db, persistStorage, storageEstimate } from "./db.js";
-import { allSongs, getSong, saveSong, importPdf, deleteSong, sortSongs, matches, folders } from "./library.js";
+import { allSongs, getSong, saveSong, importPdf, deleteSong, sortSongs, matches, folders, mergeSongs, appendFiles } from "./library.js";
 import { allSetlists, getSetlist, saveSetlist, newSetlist, deleteSetlist, duplicateSetlist, addToSetlist } from "./setlists.js";
 import { settings, setSetting, resetSettings, applyTheme } from "./settings.js";
 import { openSong, attachAudio, viewerOpen } from "./viewer.js";
@@ -25,7 +25,8 @@ const S = () => settings();
 const state = {
   tab: "songs",
   q: "",
-  filter: "", // "" | "★" | map-naam
+  filter: "", // "" | "★" | "map:<naam>" | "part:<partij>"
+  sel: null, // Set met geselecteerde nummers (selecteermodus), anders null
   openList: null, // id van geopende afspeellijst
   needPermission: [], // gekoppelde mappen die opnieuw toestemming nodig hebben
   spBroken: [], // SharePoint-mappen waarvan de link niet meer werkt
@@ -34,6 +35,10 @@ const state = {
 // ---------- tabs ----------
 
 function setTab(tab) {
+  if (tab !== "songs" && state.sel) {
+    state.sel = null;
+    renderSelActions();
+  }
   if (state.tab === "tools" && tab !== "tools") stopTools();
   state.tab = tab;
   $$(".bottom-nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
@@ -85,11 +90,9 @@ async function renderSongs() {
   const tab = $("#tab-songs");
   const all = await allSongs();
   const fl = await folders();
-  if (state.filter && state.filter !== "★" && !fl.includes(state.filter)) state.filter = "";
-  let list = all.filter((s) => matches(s, state.q));
-  if (state.filter === "★") list = list.filter((s) => s.favorite);
-  else if (state.filter) list = list.filter((s) => s.folder === state.filter);
-  list = sortSongs(list, S().sort, S().sortDesc);
+  if (state.filter && !filterLabel(state.filter, all)) state.filter = "";
+  if (state.sel) for (const id of [...state.sel]) if (!all.some((x) => x.id === id)) state.sel.delete(id);
+  if (state.sel && !state.sel.size) state.sel = null;
 
   const search = h("input", {
     class: "search",
@@ -120,13 +123,33 @@ async function renderSongs() {
     })
   );
 
-  const chips = h(
-    "div",
-    { class: "chips" },
-    chip("Alles", ""),
-    all.some((s) => s.favorite) ? chip("★ Favoriet", "★") : null,
-    fl.map((f) => chip(f, f))
-  );
+  // Eén filterknop in plaats van een rij knoppen per map.
+  const hasFilters = fl.length || all.some((x) => x.favorite) || all.some((x) => x.part);
+  if (hasFilters) {
+    const active = state.filter ? filterLabel(state.filter, all) : null;
+    tools.insertBefore(
+      h(
+        "button",
+        { type: "button", class: "chip" + (active ? " on" : ""), onclick: () => pickFilter(all, fl) },
+        h("span", { class: "chip-ic", html: icon("filter") }),
+        h("span", {}, active || "Filter"),
+        active
+          ? h("span", {
+              class: "chip-x",
+              role: "button",
+              "aria-label": "Filter weg",
+              onclick: (e) => {
+                e.stopPropagation();
+                state.filter = "";
+                renderSongs();
+              },
+              html: icon("close"),
+            })
+          : null
+      ),
+      tools.lastChild
+    );
+  }
 
   const listEl = h("div", { id: "song-list" });
   const folderBar = state.needPermission.length
@@ -154,17 +177,30 @@ async function renderSongs() {
         html: icon("link") + `<span>SharePoint-link van "${state.spBroken[0].name}" werkt niet meer. Tik om de nieuwe link te plakken.</span>`,
       })
     : null;
-  fill(tab, spBar, folderBar, h("div", { class: "search-row" }, h("span", { class: "search-ic", html: icon("search") }), search), tools, fl.length || all.some((s) => s.favorite) ? chips : null, listEl);
-
-  function chip(label, val) {
-    return h("button", { type: "button", class: "chip" + (state.filter === val ? " on" : ""), onclick: () => { state.filter = val; renderSongs(); } }, label);
-  }
+  const selBar = state.sel
+    ? h(
+        "div",
+        { class: "sel-bar" },
+        h("button", { type: "button", class: "icon-btn", "aria-label": "Stoppen met selecteren", onclick: endSelect, html: icon("close") }),
+        h("b", {}, `${state.sel.size} geselecteerd`),
+        h("button", {
+          type: "button",
+          class: "btn small",
+          onclick: () => {
+            const visible = sortSongs(applyFilter(all.filter((x) => matches(x, state.q))), S().sort, S().sortDesc);
+            const allOn = visible.every((x) => state.sel.has(x.id));
+            visible.forEach((x) => (allOn ? state.sel.delete(x.id) : state.sel.add(x.id)));
+            renderSongs();
+          },
+        }, "Alles")
+      )
+    : null;
+  fill(tab, spBar, folderBar, selBar || h("div", { class: "search-row" }, h("span", { class: "search-ic", html: icon("search") }), search), selBar ? null : tools, listEl);
+  renderSelActions();
   renderSongsList();
 
   async function renderSongsList() {
-    let items = all.filter((s) => matches(s, state.q));
-    if (state.filter === "★") items = items.filter((s) => s.favorite);
-    else if (state.filter) items = items.filter((s) => s.folder === state.filter);
+    let items = applyFilter(all.filter((s) => matches(s, state.q)));
     items = sortSongs(items, S().sort, S().sortDesc);
 
     if (!all.length) {
@@ -223,9 +259,17 @@ function songRow(s, grid) {
       songMenu(s);
     },
   });
+  const selected = state.sel && state.sel.has(s.id);
   const el = h(
     "div",
-    { class: grid ? "tile" : "row", role: "button", tabindex: 0, onclick: () => openSong(s.id) },
+    {
+      class: (grid ? "tile" : "row") + (state.sel ? " selecting" : "") + (selected ? " selected" : ""),
+      role: "button",
+      tabindex: 0,
+      "aria-pressed": state.sel ? String(!!selected) : null,
+      onclick: () => (state.sel ? toggleSel(s.id) : openSong(s.id)),
+    },
+    state.sel ? h("span", { class: "sel-box", html: selected ? icon("check") : "" }) : null,
     h("div", { class: "thumb-wrap" }, img),
     h(
       "div",
@@ -234,10 +278,11 @@ function songRow(s, grid) {
       h("div", { class: "row-sub" }, sub),
       s.folder && !grid ? h("div", { class: "row-tag" }, s.folder) : null
     ),
-    more
+    state.sel ? null : more
   );
-  el.addEventListener("keydown", (e) => e.key === "Enter" && openSong(s.id));
-  longPress(el, () => songMenu(s));
+  el.addEventListener("keydown", (e) => e.key === "Enter" && (state.sel ? toggleSel(s.id) : openSong(s.id)));
+  // Lang indrukken = selecteren (daarna tik je er meer aan).
+  longPress(el, () => (state.sel ? toggleSel(s.id) : startSelect(s.id)));
   return el;
 }
 
@@ -281,6 +326,194 @@ function longPress(el, fn) {
   el.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 
+// ---------- filter ----------
+
+function filterLabel(f, all) {
+  if (f === "★") return all.some((x) => x.favorite) ? "Favorieten" : null;
+  if (f.startsWith("part:")) return all.some((x) => x.part === f.slice(5)) ? f.slice(5) : null;
+  const m = f.startsWith("map:") ? f.slice(4) : f;
+  return all.some((x) => x.folder === m) ? m : null;
+}
+
+function applyFilter(list) {
+  const f = state.filter;
+  if (!f) return list;
+  if (f === "★") return list.filter((x) => x.favorite);
+  if (f.startsWith("part:")) return list.filter((x) => x.part === f.slice(5));
+  const m = f.startsWith("map:") ? f.slice(4) : f;
+  return list.filter((x) => x.folder === m);
+}
+
+async function pickFilter(all, fl) {
+  const coll = new Intl.Collator("nl", { numeric: true });
+  const parts = [...new Set(all.map((x) => x.part).filter(Boolean))].sort(coll.compare);
+  const v = await menu("Filter", [
+    { label: "Alles", value: "", icon: icon("music"), active: !state.filter },
+    all.some((x) => x.favorite) ? { label: "Favorieten", value: "★", icon: icon("star"), active: state.filter === "★" } : null,
+    ...fl.map((f) => ({ label: f, value: "map:" + f, icon: icon("folder"), active: state.filter === "map:" + f || state.filter === f })),
+    ...parts.map((p) => ({ label: p, value: "part:" + p, icon: icon("audio"), active: state.filter === "part:" + p })),
+  ].filter(Boolean));
+  if (v === undefined || v === null) return;
+  state.filter = v;
+  renderSongs();
+}
+
+// ---------- selecteren ----------
+
+function startSelect(id) {
+  state.sel = new Set([id]);
+  if (navigator.vibrate) navigator.vibrate(15);
+  renderSongs();
+}
+
+function endSelect() {
+  state.sel = null;
+  renderSongs();
+}
+
+function toggleSel(id) {
+  if (!state.sel) return;
+  state.sel.has(id) ? state.sel.delete(id) : state.sel.add(id);
+  if (!state.sel.size) state.sel = null;
+  renderSongs();
+}
+
+// Actiebalk onderin tijdens selecteren.
+function renderSelActions() {
+  let bar = $("#sel-actions");
+  if (!state.sel || state.tab !== "songs") {
+    if (bar) bar.remove();
+    $("#fab").hidden = state.tab !== "songs" && !(state.tab === "lists" && !state.openList);
+    return;
+  }
+  $("#fab").hidden = true;
+  if (!bar) {
+    bar = h("div", { id: "sel-actions", class: "sel-actions" });
+    document.body.append(bar);
+  }
+  const n = state.sel.size;
+  const act = (ic, label, fn, opts = {}) =>
+    h("button", { type: "button", class: "sel-act" + (opts.danger ? " danger" : ""), disabled: opts.disabled || null, onclick: fn, html: icon(ic) + `<span>${label}</span>` });
+  fill(
+    bar,
+    act("list", "Lijst", () => addSongsToListDlg([...state.sel])),
+    act("folder", "Map", () => setFolderForSel()),
+    act("star", "Favoriet", () => favSel()),
+    act("copy", "Samen", () => mergeSel(), { disabled: n < 2 }),
+    act("trash", "Weg", () => deleteSel(), { danger: true })
+  );
+}
+
+async function setFolderForSel() {
+  const fl = await folders();
+  const v = await menu("Naar map", [
+    ...fl.map((f) => ({ label: f, value: "m:" + f, icon: icon("folder") })),
+    { label: "Nieuwe map…", value: "__new", icon: icon("plus") },
+    { label: "Geen map", value: "__none", icon: icon("close") },
+  ]);
+  if (!v) return;
+  let name = v === "__none" ? "" : v.slice(2);
+  if (v === "__new") {
+    name = await promptDlg("Naam van de map", "", { placeholder: "bijv. Concert, Marsen, Kerst" });
+    if (!name) return;
+  }
+  for (const id of state.sel) {
+    const x = await getSong(id);
+    if (x) {
+      x.folder = name;
+      await saveSong(x);
+    }
+  }
+  toast(name ? `Naar map "${name}"` : "Map weggehaald", 1800);
+  endSelect();
+}
+
+async function favSel() {
+  const list = (await Promise.all([...state.sel].map(getSong))).filter(Boolean);
+  const on = !list.every((x) => x.favorite);
+  for (const x of list) {
+    x.favorite = on;
+    await saveSong(x);
+  }
+  toast(on ? "Favoriet" : "Geen favoriet meer", 1500);
+  endSelect();
+}
+
+async function deleteSel() {
+  const n = state.sel.size;
+  if (!(await confirmDlg(`${n} ${n === 1 ? "nummer" : "nummers"} verwijderen?`, "Ook de krabbels erop verdwijnen.", "Verwijderen", true))) return;
+  for (const id of [...state.sel]) await deleteSong(id);
+  toast("Verwijderd", 1500);
+  endSelect();
+}
+
+// Samenvoegen: volgorde kiezen (in de volgorde van aantikken) en een naam geven.
+async function mergeSel() {
+  const order = (await Promise.all([...state.sel].map(getSong))).filter(Boolean);
+  const name = h("input", { class: "field", value: order[0].title });
+  const listEl = h("div", { class: "merge-list" });
+  const draw = () =>
+    fill(
+      listEl,
+      order.map((x, i) =>
+        h(
+          "div",
+          { class: "merge-row" },
+          h("span", { class: "num" }, i + 1),
+          h("span", { class: "merge-t" }, x.title, h("small", {}, ` · ${x.pages} p.`)),
+          h("button", { type: "button", class: "icon-btn", "aria-label": "Omhoog", disabled: i === 0 || null, onclick: () => { [order[i - 1], order[i]] = [order[i], order[i - 1]]; draw(); }, html: icon("left").replace("<svg", '<svg style="transform:rotate(90deg)"') })
+        )
+      )
+    );
+  draw();
+  const ok = await dialog({
+    title: "Samenvoegen tot één nummer",
+    content: h("div", { class: "form" }, h("label", { class: "form-row" }, h("span", {}, "Naam"), name), h("div", { class: "form-row" }, h("span", {}, "Volgorde"), listEl)),
+    buttons: [
+      { label: "Annuleren", value: false },
+      { label: "Samenvoegen", value: true, kind: "primary" },
+    ],
+  });
+  if (!ok) return;
+  const prog = $("#progress");
+  prog.hidden = false;
+  prog.querySelector("span").textContent = "Samenvoegen…";
+  prog.querySelector("i").style.width = "60%";
+  try {
+    const s = await mergeSongs(order.map((x) => x.id), name.value.trim());
+    toast(`"${s.title}": ${s.pages} pagina's`, 2500);
+    endSelect();
+  } catch (e) {
+    toast(e.message, 4000);
+  } finally {
+    prog.hidden = true;
+  }
+}
+
+// Extra pagina's (PDF of foto's) achter een bestaand nummer.
+function appendPagesDlg(song) {
+  const input = h("input", { type: "file", accept: "application/pdf,.pdf,image/*,.jpg,.jpeg,.png", multiple: true, hidden: true });
+  input.onchange = async () => {
+    const files = [...input.files].sort((a, b) => a.name.localeCompare(b.name, "nl", { numeric: true }));
+    input.remove();
+    if (!files.length) return;
+    const prog = $("#progress");
+    prog.hidden = false;
+    prog.querySelector("span").textContent = "Pagina's toevoegen…";
+    prog.querySelector("i").style.width = "60%";
+    try {
+      const added = await appendFiles(song.id, files);
+      toast(`${added} ${added === 1 ? "pagina" : "pagina's"} toegevoegd aan "${song.title}"`, 2500);
+    } catch (e) {
+      toast(e.message, 4000);
+    } finally {
+      prog.hidden = true;
+    }
+  };
+  document.body.append(input);
+  input.click();
+}
+
 async function pickSort() {
   const v = await menu(
     "Sorteren op",
@@ -302,6 +535,8 @@ async function songMenu(s) {
   const v = await menu(s.title, [
     { label: "Openen", value: "open", icon: icon("music") },
     { label: "Aan lijst toevoegen", value: "list", icon: icon("list") },
+    { label: "Pagina's toevoegen (PDF of foto)", value: "append", icon: icon("plus") },
+    { label: "Selecteren (meerdere)", value: "select", icon: icon("check") },
     { label: s.favorite ? "Geen favoriet meer" : "Favoriet", value: "fav", icon: icon("star") },
     { label: "Gegevens bewerken", value: "edit", icon: icon("edit") },
     { label: s.audioId || s.youtube ? "Opname / YouTube wijzigen" : "Opname of YouTube toevoegen", value: "edit", icon: icon("audio") },
@@ -310,6 +545,8 @@ async function songMenu(s) {
   ].filter(Boolean));
   if (v === "open") openSong(s.id);
   if (v === "list") addSongsToListDlg([s.id]);
+  if (v === "append") appendPagesDlg(s);
+  if (v === "select") startSelect(s.id);
   if (v === "fav") {
     s.favorite = !s.favorite;
     await saveSong(s);
@@ -515,7 +752,7 @@ async function importFiles(files) {
   items = items.filter(({ file: f }) => isPdfFile(f) || isImageFile(f));
   if (!items.length) return toast("Kies PDF's of foto's");
   let defFolder = "";
-  if (items.length > 1 && state.filter && state.filter !== "★") defFolder = state.filter;
+  if (items.length > 1 && state.filter.startsWith("map:")) defFolder = state.filter.slice(4);
   // Meerdere foto's: één nummer met meerdere pagina's, of elke foto apart?
   const photos = items.filter(({ file: f }) => isImageFile(f) && !isPdfFile(f));
   if (photos.length > 1) {
@@ -1284,6 +1521,9 @@ function init() {
     if (b.dataset.tab === "lists" && state.tab === "lists") state.openList = null;
     setTab(b.dataset.tab);
   }));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.sel && !document.querySelector(".dlg-back") && !viewerOpen()) endSelect();
+  });
   $("#fab").addEventListener("click", () => (state.tab === "lists" ? createList() : addMenu()));
   document.addEventListener("thumb-changed", (e) => {
     const u = thumbUrls.get(e.detail);

@@ -34,6 +34,7 @@ const ASSETS = [
   "./vendor/pdfjs/pdf.min.mjs",
   "./vendor/pdfjs/pdf.worker.min.mjs",
   "./vendor/fonts/noto-music.woff2",
+  "./vendor/pdf-lib/pdf-lib.min.js",
   "./branding/eendracht.png",
   "./icons/icon.svg",
   "./icons/icon-192.png",

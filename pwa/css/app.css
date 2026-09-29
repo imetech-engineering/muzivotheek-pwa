@@ -2052,3 +2052,128 @@ textarea {
   justify-content: flex-end;
   margin-top: -4px;
 }
+
+/* ---------- filter & selecteren ---------- */
+.chip-ic {
+  display: flex;
+}
+.chip-x {
+  display: flex;
+  margin: 0 -6px 0 2px;
+  padding: 4px;
+  border-radius: 50%;
+}
+.chip-x .ic {
+  width: 16px;
+  height: 16px;
+}
+.sel-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 50px;
+  margin-bottom: 10px;
+  padding: 0 6px 0 2px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sel-bar b {
+  flex: 1;
+  font-size: 17px;
+}
+.row.selecting,
+.tile.selecting {
+  cursor: pointer;
+}
+.sel-box {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong, var(--line));
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: #fff;
+}
+.sel-box .ic {
+  width: 18px;
+  height: 18px;
+  stroke-width: 3;
+}
+.row.selected,
+.tile.selected {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent) inset;
+}
+.selected .sel-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.tile .sel-box {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.9);
+}
+.tile.selected .sel-box {
+  background: var(--accent);
+}
+.sel-actions {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--nav-h) + var(--safe-b) + 12px);
+  z-index: 22;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  width: min(520px, calc(100% - 24px));
+  background: var(--card);
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--line);
+}
+.sel-act {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-height: 56px;
+  border: 0;
+  background: none;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.sel-act:active {
+  background: var(--card-2);
+}
+.sel-act:disabled {
+  opacity: 0.35;
+}
+.sel-act.danger {
+  color: var(--danger);
+}
+.merge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.merge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--line);
+}
+.merge-t {
+  flex: 1;
+  min-width: 0;
+}
+.merge-t small {
+  color: var(--text-3);
+}
