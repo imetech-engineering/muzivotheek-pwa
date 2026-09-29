@@ -8,7 +8,7 @@ import { loadPdf, renderPage, pageAspect, findContentBox } from "./pdf.js";
 import { getSong, saveSong, markOpened } from "./library.js";
 import { getSetlist } from "./setlists.js";
 import { settings, setSetting } from "./settings.js";
-import { loadInk, saveInk, drawInk, hitTest, STAMP_GROUPS, STAMP_SIZES, COLORS, loadMusicFont } from "./ink.js";
+import { loadInk, saveInk, drawInk, hitTest, STAMP_GROUPS, STAMP_SIZES, COLORS, YELLOW, loadMusicFont } from "./ink.js";
 import { Metronome, tempoName } from "./metronome.js";
 import { $, h, fill, toast, dialog, promptDlg, confirmDlg, menu, fmtTime } from "./ui.js";
 import { icon } from "./icons.js";
@@ -1251,7 +1251,7 @@ function beginDraw(e) {
 }
 
 function markerColor(c) {
-  return c === "#111111" ? "#fde047" : c;
+  return c === "#111111" ? YELLOW : c;
 }
 
 function toPage(d, ev) {

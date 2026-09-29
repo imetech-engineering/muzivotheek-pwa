@@ -55,7 +55,8 @@ export function drawInk(ctx, items, box, w, h, selected = null) {
     ctx.strokeStyle = it.c;
     ctx.lineWidth = Math.max(1, it.w * sx);
     if (it.t === "marker") {
-      ctx.globalAlpha = 0.35;
+      // Geel mag feller (minder doorzichtig), de rest blijft licht zodat noten leesbaar blijven.
+      ctx.globalAlpha = /^#ff[ef]/i.test(it.c) ? 0.5 : 0.35;
       ctx.lineCap = "butt";
     }
     ctx.beginPath();
@@ -176,4 +177,5 @@ export const STAMP_GROUPS = [
 // Grootte van tekens: fractie van de paginabreedte.
 export const STAMP_SIZES = [0.02, 0.03, 0.045, 0.065, 0.09];
 
-export const COLORS = ["#e11d48", "#2563eb", "#111111", "#16a34a", "#f59e0b", "#9333ea"];
+export const YELLOW = "#ffe600"; // fel geel (markeerstift)
+export const COLORS = [YELLOW, "#e11d48", "#2563eb", "#111111", "#16a34a", "#f59e0b", "#9333ea"];
