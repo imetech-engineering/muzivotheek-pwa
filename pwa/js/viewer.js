@@ -201,7 +201,12 @@ function buildDom() {
   const ytBox = h("div", { class: "v-yt-box", id: "v-yt-box" }, h("div", { id: "v-yt-frame" }));
   const badge = h("div", { class: "v-badge", id: "v-badge", role: "status" });
   attachBadge(badge);
-  r.append(stage, flash, badge, top, bottom, tools, panel, ytBox, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
+  // Bladeren tijdens krabbelen: vaste pijlen links en rechts (vegen tekent dan).
+  const drawNav = [
+    h("button", { type: "button", class: "v-drawnav left", "aria-label": "Vorige pagina", onclick: () => prev(), html: icon("left") }),
+    h("button", { type: "button", class: "v-drawnav right", "aria-label": "Volgende pagina", onclick: () => next(), html: icon("right") }),
+  ];
+  r.append(stage, flash, badge, top, bottom, tools, ...drawNav, panel, ytBox, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
   attachGestures(stage);
   let lastSize = "";
   new ResizeObserver(() => {
@@ -484,6 +489,7 @@ function addLinks(el) {
 
 async function render(keepCam = false) {
   if (!st.doc || !st.open || !$("#v-stage")) return;
+  if (st.selected) selectStamp(null); // selectie hoort bij de vorige pagina
   try {
     await renderInner(keepCam);
   } catch (e) {
@@ -1003,7 +1009,8 @@ function attachGestures(stage) {
     const { W } = stageSize();
     const fx = p.x / W;
     if (st.tool === "link") return placeLink(e);
-    if (st.tool) return;
+    // Selecteren: leeg vlak aan de rand tikken bladert gewoon om.
+    if (st.tool && st.tool !== "select") return;
 
     const zoneW = 0.3;
     if (S().tapZones && fx > 1 - zoneW) {
@@ -1014,6 +1021,7 @@ function attachGestures(stage) {
       lastTap = null;
       return S().tapLeftPrev ? prev() : next();
     }
+    if (st.tool) return;
     // Midden: enkel = knoppen tonen/verbergen, dubbel = zoomen.
     const now = performance.now();
     if (lastTap && now - lastTap.t < 300 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 40) {
@@ -1485,18 +1493,23 @@ function beginDraw(e) {
 // Bij plaatsen/verslepen van een teken: rond vergrootglas boven de vinger met
 // een kruisje op de plek van het teken, zodat je ziet waar het komt.
 
-const LOUPE = 150;
-const LOUPE_ZOOM = 2.2;
+// Groot genoeg om echt te zien waar je zit: telefoon ±190 px, tablet tot 260 px.
+const loupeSize = () => Math.round(Math.max(190, Math.min(260, Math.min(innerWidth, innerHeight) * 0.32)));
+const LOUPE_ZOOM = 2.5;
 
 function showLoupe(d, fingerX, fingerY) {
   const el = d.el;
   if (!el || !el.isConnected) return;
   let lp = $("#v-loupe");
   const dpr = DPR();
+  const LOUPE = loupeSize();
   if (!lp) {
     lp = h("canvas", { id: "v-loupe", class: "v-loupe", "aria-hidden": "true" });
-    lp.width = lp.height = Math.round(LOUPE * dpr);
     root().append(lp);
+  }
+  if (lp.width !== Math.round(LOUPE * dpr)) {
+    lp.width = lp.height = Math.round(LOUPE * dpr);
+    lp.style.width = lp.style.height = LOUPE + "px";
   }
   const sheet = el._sheet;
   const r = sheet.getBoundingClientRect();

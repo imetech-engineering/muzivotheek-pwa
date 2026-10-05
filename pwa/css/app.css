@@ -2258,8 +2258,8 @@ textarea {
 .v-loupe {
   position: absolute;
   z-index: 30;
-  width: 150px;
-  height: 150px;
+  width: 190px;
+  height: 190px;
   border-radius: 50%;
   border: 4px solid #fff;
   box-shadow: 0 0 0 2px var(--pink), 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -2271,4 +2271,45 @@ textarea {
 }
 .viewer.drawing .v-badge {
   display: none;
+}
+.v-drawnav {
+  display: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 12;
+  width: 48px;
+  height: 96px;
+  border: 0;
+  background: rgba(22, 24, 32, 0.55);
+  color: #fff;
+  place-items: center;
+}
+.v-drawnav .ic {
+  width: 30px;
+  height: 30px;
+}
+.v-drawnav.left {
+  left: 0;
+  border-radius: 0 16px 16px 0;
+}
+.v-drawnav.right {
+  right: 0;
+  border-radius: 16px 0 0 16px;
+}
+.viewer.drawing .v-drawnav {
+  display: grid;
+}
+/* Kleine tablets: knoppen iets compacter zodat elke rij op één regel past. */
+@media (min-width: 461px) and (max-width: 640px) {
+  .tbtn {
+    width: 36px !important;
+  }
+  .tcolor {
+    width: 28px !important;
+    height: 28px !important;
+  }
+  .v-tools .trow {
+    gap: 3px;
+  }
 }
