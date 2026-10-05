@@ -136,7 +136,7 @@ export async function exportBackup(onProgress) {
 export async function importBackup(file, mode = "merge") {
   const files = await readZip(file);
   const metaBytes = files.get("muzivotheek.json");
-  if (!metaBytes) throw new Error("Dit is geen Muzivotheek-back-up");
+  if (!metaBytes) throw new Error("Dit is geen MuzIVOtheek-back-up");
   const meta = JSON.parse(new TextDecoder().decode(metaBytes));
   if (mode === "replace") {
     for (const s of ["songs", "files", "thumbs", "notes", "audio", "setlists"]) await db.clear(s);

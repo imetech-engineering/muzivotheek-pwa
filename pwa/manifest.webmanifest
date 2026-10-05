@@ -1,6 +1,6 @@
 {
-  "name": "Muzivotheek",
-  "short_name": "Muzivotheek",
+  "name": "MuzIVOtheek",
+  "short_name": "MuzIVOtheek",
   "description": "Bladmuziek lezen, afspeellijsten en krabbels. Werkt offline.",
   "id": "./",
   "start_url": "./",

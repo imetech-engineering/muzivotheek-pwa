@@ -511,17 +511,7 @@ async function renderInner(keepCam) {
   } else if (st.half && st.page < st.pages) {
     const cur = await pageEl(st.page, W, H);
     const nxt = await pageEl(st.page + 1, W, H);
-    // halfOrder "curTop": boven = onderste helft van deze pagina, onder = bovenste helft van de volgende.
-    const parts = S().halfOrder === "nextTop" ? [[nxt, "top"], [cur, "bottom"]] : [[cur, "bottom"], [nxt, "top"]];
-    const comp = h("div", { class: "v-half" });
-    parts.forEach(([el, half], i) => {
-      const part = h("div", { class: "v-halfpart " + half }, el);
-      part.style.height = el._h / 2 + "px";
-      comp.append(part);
-      if (i === 0) comp.append(h("div", { class: "v-halfline" }));
-    });
-    comp.style.width = Math.max(cur._w, nxt._w) + "px";
-    els.push(comp);
+    els.push(buildHalf(cur, nxt));
   } else {
     els.push(await pageEl(st.page, W, H));
   }
@@ -644,6 +634,70 @@ function updateChrome() {
     $("#v-nextsong").disabled = st.listIndex >= st.list.songIds.length - 1;
   }
   root().classList.toggle("has-audio", !!st.song.audioId);
+}
+
+// ---------- halve pagina ----------
+//
+// Deze pagina vanaf scheiding f tot onder, en de volgende pagina van boven tot f.
+// f is per pagina per nummer instelbaar met de roze greep rechts op de lijn
+// (song.halfSplits[pagina]); standaard 0.5.
+
+const halfSplit = (p) => {
+  const v = st.song.halfSplits && st.song.halfSplits[p];
+  return typeof v === "number" ? v : 0.5;
+};
+
+function buildHalf(cur, nxt) {
+  const nextTop = S().halfOrder === "nextTop";
+  const comp = h("div", { class: "v-half" });
+  const curPart = h("div", { class: "v-halfpart" }, cur);
+  const nxtPart = h("div", { class: "v-halfpart" }, nxt);
+  const line = h("div", { class: "v-halfline" });
+  const grip = h("div", { class: "v-halfgrip", role: "slider", "aria-label": "Scheiding verschuiven", html: '<i></i><i></i><i></i>' });
+  line.append(grip);
+  comp.append(...(nextTop ? [nxtPart, line, curPart] : [curPart, line, nxtPart]));
+  comp.style.width = Math.max(cur._w, nxt._w) + "px";
+  const layout = (f) => {
+    // Deze pagina: deel f..1 zichtbaar; volgende: deel 0..f.
+    curPart.style.height = (1 - f) * cur._h + "px";
+    cur.style.top = -f * cur._h + "px";
+    nxtPart.style.height = f * nxt._h + "px";
+    nxt.style.top = "0px";
+    grip.setAttribute("aria-valuenow", Math.round(f * 100));
+  };
+  let f = halfSplit(st.page);
+  layout(f);
+
+  // Greep slepen: scheiding verschuiven en onthouden voor deze pagina.
+  let drag = null;
+  grip.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    drag = { y: e.clientY, f };
+    comp.classList.add("dragging");
+  });
+  grip.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    e.stopPropagation();
+    const dy = (e.clientY - drag.y) / cam.z;
+    // Lijn omlaag: bij "deze pagina boven" wordt dat deel groter (f kleiner).
+    const nf = nextTop ? drag.f + dy / nxt._h : drag.f - dy / cur._h;
+    f = Math.min(0.9, Math.max(0.1, nf));
+    layout(f);
+  });
+  const end = async (e) => {
+    if (!drag) return;
+    e.stopPropagation();
+    drag = null;
+    comp.classList.remove("dragging");
+    st.song.halfSplits = { ...(st.song.halfSplits || {}), [st.page]: +f.toFixed(3) };
+    await saveSong(st.song);
+    toast("Onthouden voor deze pagina", 1200);
+  };
+  grip.addEventListener("pointerup", end);
+  grip.addEventListener("pointercancel", end);
+  return comp;
 }
 
 // ---------- bladeren ----------
@@ -1098,22 +1152,27 @@ function renderToolbar() {
       )
     );
   }
-  fill(
-    bar,
+  // Twee rijen, zodat niets buiten beeld valt: boven gereedschap, onder kleur en maat.
+  const row1 = h(
+    "div",
+    { class: "trow" },
     tb("pen", "pen", "Pen"),
     tb("marker", "marker", "Markeerstift"),
     tb("text", "stamp", "Tekens en tekst"),
     tb("eraser", "eraser", "Gum"),
     tb("link", "link", "Sprong maken"),
     h("span", { class: "tsep" }),
-    colors,
-    ...extra,
-    h("span", { class: "tsep" }),
     h("button", { type: "button", class: "tbtn", title: "Ongedaan maken", "aria-label": "Ongedaan maken", onclick: undo, html: icon("undo") }),
     h("button", { type: "button", class: "tbtn", title: "Pagina wissen", "aria-label": "Pagina wissen", onclick: clearPage, html: icon("trash") }),
-    h("button", { type: "button", class: "tbtn done", onclick: () => setTool(null), html: icon("check") + "<span>Klaar</span>" }),
-    st.tool === "link" ? h("span", { class: "thint" }, "Tik waar de sprong moet komen") : null
+    h("button", { type: "button", class: "tbtn done", "aria-label": "Klaar", onclick: () => setTool(null), html: icon("check") + "<span>Klaar</span>" })
   );
+  const row2 =
+    st.tool === "link"
+      ? h("div", { class: "trow" }, h("span", { class: "thint" }, "Tik waar de sprong moet komen"))
+      : st.tool === "eraser"
+        ? h("div", { class: "trow" }, h("span", { class: "thint" }, "Veeg over wat weg moet"))
+        : h("div", { class: "trow" }, colors, ...extra.filter((x) => !(x.classList && x.classList.contains("tsep"))));
+  fill(bar, row1, row2);
 }
 
 // Kiezer met alle tekens als symbolen, per groep.
@@ -1236,7 +1295,9 @@ function beginDraw(e) {
       items.push(item);
     }
     selectStamp({ page: hit.page, item });
-    return { stamp: true, page: hit.page, el: hit.el, item, items, before, dx: item.x - hit.x, dy: item.y - hit.y, moved: i < 0 };
+    const d = { stamp: true, page: hit.page, el: hit.el, item, items, before, dx: item.x - hit.x, dy: item.y - hit.y, moved: i < 0 };
+    showLoupe(d, e.clientX, e.clientY);
+    return d;
   }
   if (st.tool === "eraser") {
     const d = { erase: true, page: hit.page, el: hit.el, items, before, pageW };
@@ -1248,6 +1309,69 @@ function beginDraw(e) {
   items.push(it);
   refreshInk(hit.page);
   return { page: hit.page, el: hit.el, it, items, before };
+}
+
+// ---------- vergrootglas ----------
+// Bij plaatsen/verslepen van een teken: rond vergrootglas boven de vinger met
+// een kruisje op de plek van het teken, zodat je ziet waar het komt.
+
+const LOUPE = 150;
+const LOUPE_ZOOM = 2.2;
+
+function showLoupe(d, fingerX, fingerY) {
+  const el = d.el;
+  if (!el || !el.isConnected) return;
+  let lp = $("#v-loupe");
+  const dpr = DPR();
+  if (!lp) {
+    lp = h("canvas", { id: "v-loupe", class: "v-loupe", "aria-hidden": "true" });
+    lp.width = lp.height = Math.round(LOUPE * dpr);
+    root().append(lp);
+  }
+  const sheet = el._sheet;
+  const r = sheet.getBoundingClientRect();
+  const box = el._box;
+  // Middelpunt = plek van het teken (niet de vinger zelf).
+  const px = r.left + ((d.item.x - box.x) / box.w) * r.width;
+  const py = r.top + ((d.item.y - box.y) / box.h) * r.height;
+  const kx = sheet.width / r.width;
+  const ky = sheet.height / r.height;
+  const sw = (LOUPE / LOUPE_ZOOM) * kx;
+  const sh = (LOUPE / LOUPE_ZOOM) * ky;
+  const sx = (px - r.left) * kx - sw / 2;
+  const sy = (py - r.top) * ky - sh / 2;
+  const ctx = lp.getContext("2d");
+  const W = lp.width;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, W, W);
+  ctx.drawImage(sheet, sx, sy, sw, sh, 0, 0, W, W);
+  ctx.drawImage(el._ink, sx, sy, sw, sh, 0, 0, W, W);
+  // Kruisje in het midden.
+  ctx.strokeStyle = "#c41f6e";
+  ctx.lineWidth = 2 * dpr;
+  ctx.beginPath();
+  ctx.moveTo(W / 2 - 12 * dpr, W / 2);
+  ctx.lineTo(W / 2 + 12 * dpr, W / 2);
+  ctx.moveTo(W / 2, W / 2 - 12 * dpr);
+  ctx.lineTo(W / 2, W / 2 + 12 * dpr);
+  ctx.stroke();
+  // Boven de vinger; is daar geen ruimte, dan ernaast.
+  const rr = root().getBoundingClientRect();
+  let left = fingerX - rr.left - LOUPE / 2;
+  let top = fingerY - rr.top - LOUPE - 50;
+  if (top < 8) {
+    top = Math.max(8, fingerY - rr.top - LOUPE / 2);
+    left = fingerX - rr.left + (fingerX - rr.left > rr.width / 2 ? -LOUPE - 50 : 50);
+  }
+  left = Math.max(8, Math.min(rr.width - LOUPE - 8, left));
+  lp.style.left = left + "px";
+  lp.style.top = top + "px";
+  lp.hidden = false;
+}
+
+function hideLoupe() {
+  const lp = $("#v-loupe");
+  if (lp) lp.hidden = true;
 }
 
 function markerColor(c) {
@@ -1267,6 +1391,7 @@ function moveDraw(d, e) {
     d.item.y = +(q.y + d.dy).toFixed(4);
     d.moved = true;
     refreshInk(d.page);
+    showLoupe(d, e.clientX, e.clientY);
     return;
   }
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
@@ -1287,6 +1412,7 @@ function eraseAt(d, pt) {
 }
 
 function endDraw(d) {
+  hideLoupe();
   if (d.stamp && !d.moved) return;
   if (d.erase && d.items.length === d.before.length) return;
   st.undo.push({ page: d.page, before: d.before });
@@ -1296,6 +1422,7 @@ function endDraw(d) {
 
 // Tweede vinger kwam erbij: het was knijpen, geen tekenen.
 function abortDraw(d) {
+  hideLoupe();
   if (d.stamp || d.erase) {
     st.ink.set(d.page, d.before);
     if (d.stamp) selectStamp(null);

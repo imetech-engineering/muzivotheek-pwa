@@ -1400,7 +1400,7 @@ async function renderSettings() {
       "div",
       { class: "about" },
       h("img", { src: "branding/eendracht.png", alt: "Eendracht Aalten", class: "about-logo" }),
-      h("div", {}, h("b", {}, "Muzivotheek"), " · versie " + VERSION + (BUILD.startsWith("__") ? "" : " (" + BUILD + ")")),
+      h("div", {}, h("b", {}, "MuzIVOtheek"), " · versie " + VERSION + (BUILD.startsWith("__") ? "" : " (" + BUILD + ")")),
       h("button", { type: "button", class: "btn small", onclick: manualUpdateCheck }, "Controleren op updates"),
       h("div", { class: "set-s" }, "Werkt offline. Je muziek verlaat dit apparaat niet.")
     )
@@ -1543,7 +1543,7 @@ function init() {
   document.addEventListener("setlists", () => state.tab === "lists" && !viewerOpen() && renderLists());
   setTab("songs");
   importShared();
-  // Link gedeeld vanuit WhatsApp/mail (Delen → Muzivotheek).
+  // Link gedeeld vanuit WhatsApp/mail (Delen → MuzIVOtheek).
   const sharedLink = new URLSearchParams(location.search).get("link");
   if (sharedLink) {
     history.replaceState(null, "", location.pathname);

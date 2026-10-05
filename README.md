@@ -1,4 +1,4 @@
-# Muzivotheek
+# MuzIVOtheek
 
 Bladmuziek-lezer als PWA voor tablet en telefoon. Werkt volledig offline; alle
 PDF's, krabbels en afspeellijsten blijven op het apparaat.
