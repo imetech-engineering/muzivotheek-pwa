@@ -1546,7 +1546,7 @@ function beginDraw(e) {
 
 // Groot genoeg om echt te zien waar je zit: telefoon ±190 px, tablet tot 260 px.
 const loupeSize = () => Math.round(Math.max(190, Math.min(260, Math.min(innerWidth, innerHeight) * 0.32)));
-const LOUPE_ZOOM = 2.5;
+const LOUPE_ZOOM = 1.6; // niet te sterk: liever meer omgeving zien
 
 function showLoupe(d, fingerX, fingerY) {
   const el = d.el;
