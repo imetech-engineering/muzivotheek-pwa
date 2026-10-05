@@ -8,7 +8,7 @@ import { loadPdf, renderPage, pageAspect, findContentBox } from "./pdf.js";
 import { getSong, saveSong, markOpened } from "./library.js";
 import { getSetlist } from "./setlists.js";
 import { settings, setSetting } from "./settings.js";
-import { loadInk, saveInk, drawInk, hitTest, STAMP_GROUPS, STAMP_SIZES, COLORS, YELLOW, loadMusicFont } from "./ink.js";
+import { loadInk, saveInk, drawInk, hitTest, strokeBounds, STAMP_GROUPS, STAMP_SIZES, COLORS, YELLOW, loadMusicFont } from "./ink.js";
 import { Metronome, tempoName } from "./metronome.js";
 import { $, h, fill, toast, dialog, promptDlg, confirmDlg, menu, fmtTime } from "./ui.js";
 import { icon } from "./icons.js";
@@ -852,7 +852,21 @@ function attachGestures(stage) {
   }
 
   function startPan(p, e) {
-    g = { type: "pending", x0: p.x, y0: p.y, t0: performance.now(), cam0: { ...cam }, vx: 0, vy: 0, lx: p.x, ly: p.y, lt: performance.now(), e };
+    const pend = { type: "pending", x0: p.x, y0: p.y, t0: performance.now(), cam0: { ...cam }, vx: 0, vy: 0, lx: p.x, ly: p.y, lt: performance.now(), e };
+    g = pend;
+    // Lang indrukken op een krabbel (buiten tekenen): meteen selecteren en verslepen.
+    if (!st.tool && S().showNotes) {
+      const cx = e.clientX;
+      const cy = e.clientY;
+      setTimeout(() => {
+        if (g !== pend || pts.size !== 1) return;
+        const d = grabAt({ clientX: cx, clientY: cy });
+        if (!d) return;
+        lastTap && clearTimeout(lastTap.timer);
+        lastTap = null;
+        g = { type: "draw", d };
+      }, LONG_PRESS);
+    }
   }
 
   stage.addEventListener("pointerdown", (e) => {
@@ -1054,11 +1068,16 @@ document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "BUTTON" && (e.key === " " || e.key === "Enter")) return;
   const fwd = ["PageDown", "ArrowRight", "ArrowDown", " ", "Enter", "MediaTrackNext"];
   const back = ["PageUp", "ArrowLeft", "ArrowUp", "Backspace", "MediaTrackPrevious"];
+  if (st.selected && (e.key === "Delete" || e.key === "Backspace")) {
+    e.preventDefault();
+    return deleteSelected();
+  }
   let dir = 0;
   if (fwd.includes(e.key)) dir = 1;
   else if (back.includes(e.key)) dir = -1;
   else if (e.key === "Escape") {
-    if (st.tool) setTool(null);
+    if (st.selected) selectStamp(null);
+    else if (st.tool) setTool(null);
     else if (panelOpen()) closePanels();
     else closeViewer();
     e.preventDefault();
@@ -1091,6 +1110,55 @@ function setTool(t) {
   }
 }
 
+const LONG_PRESS = 450;
+
+// Krabbel onder de vinger zoeken (lijn of teken), met wat speling.
+function itemAt(hit, items, except) {
+  const pageW = hit.rect.width / hit.el._box.w;
+  const list = items.filter((x) => x !== except);
+  const i = hitTest(list, hit.x, hit.y, 18 / pageW, hit.el._aspect);
+  return i >= 0 ? list[i] : null;
+}
+
+// Selectie-sleep: het item volgt de vinger.
+function startMove(hit, item, items, before) {
+  return {
+    move: true,
+    page: hit.page,
+    el: hit.el,
+    item,
+    items,
+    before,
+    start: { x: hit.x, y: hit.y },
+    x0: hit.cx,
+    y0: hit.cy,
+    cur: { x: hit.x, y: hit.y },
+    orig: item.t === "text" ? { x: item.x, y: item.y } : item.p.slice(),
+    moved: false,
+  };
+}
+
+// Lang indrukken buiten tekenmodus: tekenmodus aan (Selecteren) en item pakken.
+function grabAt(e) {
+  const hit = pageAt(e);
+  if (!hit) return null;
+  const items = st.ink.get(hit.page) || [];
+  const item = itemAt(hit, items);
+  if (!item) return null;
+  setTool("select");
+  selectStamp({ page: hit.page, item });
+  buzz();
+  const d = startMove(hit, item, items, items.map((x) => ({ ...x })));
+  if (item.t === "text") showLoupe(d, e.clientX, e.clientY);
+  return d;
+}
+
+function buzz() {
+  try {
+    navigator.vibrate && navigator.vibrate(25);
+  } catch (e) {}
+}
+
 function currentStamp() {
   return st.stamp || STAMP_GROUPS[0].items[4]; // mf
 }
@@ -1121,18 +1189,36 @@ function renderToolbar() {
         style: `--c:${c}`,
         "aria-label": "Kleur",
         onclick: () => {
-          setSetting("penColor", c);
           if (st.selected) {
-            st.selected.item.c = c;
+            const it = st.selected.item;
+            pushUndo(st.selected.page);
+            it.c = it.t === "marker" ? markerColor(c) : c;
             saveSelected();
-          }
+          } else setSetting("penColor", c);
           renderToolbar();
         },
       })
     )
   );
   const extra = [];
-  if (st.tool === "text") {
+  const sel = st.selected;
+  if (sel) {
+    const it = sel.item;
+    const isText = it.t === "text";
+    if (st.tool === "text") {
+      const s = currentStamp();
+      extra.push(h("button", { type: "button", class: "tstamp-btn f-" + s.f, title: "Nieuw teken kiezen", onclick: () => pickStamp() }, s.v));
+    }
+    extra.push(
+      h("button", { type: "button", class: "tbtn", "aria-label": "Kleiner", title: "Kleiner", onclick: () => resizeStamp(-1) }, h("span", { class: "tsize small" }, "A")),
+      h("button", { type: "button", class: "tbtn", "aria-label": "Groter", title: "Groter", onclick: () => resizeStamp(1) }, h("span", { class: "tsize" }, "A"))
+    );
+    if (isText) extra.push(h("button", { type: "button", class: "tbtn", "aria-label": "Wijzigen", title: "Wijzigen", onclick: editSelected, html: icon("edit") }));
+    extra.push(
+      h("button", { type: "button", class: "tbtn", "aria-label": "Kopie", title: "Kopie", onclick: copySelected, html: icon("copy") }),
+      h("button", { type: "button", class: "tbtn tdel", "aria-label": "Weghalen", title: "Weghalen", onclick: deleteSelected, html: icon("trash") })
+    );
+  } else if (st.tool === "text") {
     const s = currentStamp();
     extra.push(
       h("span", { class: "tsep" }),
@@ -1140,7 +1226,6 @@ function renderToolbar() {
       h("button", { type: "button", class: "tbtn", "aria-label": "Kleiner", title: "Kleiner", onclick: () => resizeStamp(-1) }, h("span", { class: "tsize small" }, "A")),
       h("button", { type: "button", class: "tbtn", "aria-label": "Groter", title: "Groter", onclick: () => resizeStamp(1) }, h("span", { class: "tsize" }, "A"))
     );
-    if (st.selected) extra.push(h("button", { type: "button", class: "tbtn", "aria-label": "Teken weghalen", title: "Teken weghalen", onclick: deleteSelected, html: icon("close") }));
   } else if (st.tool === "pen" || st.tool === "marker") {
     extra.push(
       h(
@@ -1156,6 +1241,7 @@ function renderToolbar() {
   const row1 = h(
     "div",
     { class: "trow" },
+    tb("select", "pointer", "Selecteren"),
     tb("pen", "pen", "Pen"),
     tb("marker", "marker", "Markeerstift"),
     tb("text", "stamp", "Tekens en tekst"),
@@ -1166,17 +1252,20 @@ function renderToolbar() {
     h("button", { type: "button", class: "tbtn", title: "Pagina wissen", "aria-label": "Pagina wissen", onclick: clearPage, html: icon("trash") }),
     h("button", { type: "button", class: "tbtn done", "aria-label": "Klaar", onclick: () => setTool(null), html: icon("check") + "<span>Klaar</span>" })
   );
-  const row2 =
-    st.tool === "link"
-      ? h("div", { class: "trow" }, h("span", { class: "thint" }, "Tik waar de sprong moet komen"))
-      : st.tool === "eraser"
-        ? h("div", { class: "trow" }, h("span", { class: "thint" }, "Veeg over wat weg moet"))
-        : h("div", { class: "trow" }, colors, ...extra.filter((x) => !(x.classList && x.classList.contains("tsep"))));
+  const row2 = sel
+    ? h("div", { class: "trow" }, colors, ...extra)
+    : st.tool === "select"
+      ? h("div", { class: "trow" }, h("span", { class: "thint" }, "Tik op een krabbel"))
+      : st.tool === "link"
+        ? h("div", { class: "trow" }, h("span", { class: "thint" }, "Tik waar de sprong moet komen"))
+        : st.tool === "eraser"
+          ? h("div", { class: "trow" }, h("span", { class: "thint" }, "Veeg over wat weg moet"))
+          : h("div", { class: "trow" }, colors, ...extra.filter((x) => !(x.classList && x.classList.contains("tsep"))));
   fill(bar, row1, row2);
 }
 
 // Kiezer met alle tekens als symbolen, per groep.
-async function pickStamp() {
+async function pickStamp(target = null) {
   let chosen = null;
   const grid = h(
     "div",
@@ -1194,7 +1283,7 @@ async function pickStamp() {
               "button",
               {
                 type: "button",
-                class: "stamp-opt" + (st.stamp && st.stamp.v === it.v ? " on" : ""),
+                class: "stamp-opt" + ((target ? target.v : st.stamp && st.stamp.v) === it.v ? " on" : ""),
                 title: it.label,
                 "aria-label": it.label,
                 onclick: () => {
@@ -1214,7 +1303,13 @@ async function pickStamp() {
     const t = await promptDlg("Eigen tekst", "", { placeholder: "bijv. Solo, 2x, adem, Jan" });
     if (t) chosen = { label: t, v: t, f: "t" };
   }
-  if (chosen) {
+  if (chosen && target && st.selected && st.selected.item === target) {
+    // Geselecteerd teken vervangen, op dezelfde plek.
+    pushUndo(st.selected.page);
+    target.v = chosen.v;
+    target.f = chosen.f;
+    saveSelected();
+  } else if (chosen) {
     st.stamp = chosen;
     st.tool = "text";
     selectStamp(null);
@@ -1230,9 +1325,17 @@ function stampSize() {
 function resizeStamp(dir) {
   if (st.selected) {
     const it = st.selected.item;
-    const before = st.ink.get(st.selected.page).map((x) => ({ ...x }));
-    it.s = Math.max(0.01, Math.min(0.2, it.s * (dir > 0 ? 1.25 : 0.8)));
-    st.undo.push({ page: st.selected.page, before });
+    const k = dir > 0 ? 1.25 : 0.8;
+    pushUndo(st.selected.page);
+    if (it.t === "text") it.s = Math.max(0.01, Math.min(0.2, it.s * k));
+    else {
+      // Lijn schalen rond het midden; nieuwe array zodat ongedaan maken klopt.
+      const b = strokeBounds(it);
+      const cx = (b.x0 + b.x1) / 2;
+      const cy = (b.y0 + b.y1) / 2;
+      it.p = it.p.map((v, i) => +((i % 2 ? cy + (v - cy) * k : cx + (v - cx) * k)).toFixed(4));
+      it.w = Math.max(0.0005, Math.min(0.08, it.w * k));
+    }
     saveSelected();
   } else {
     setSetting("stampSize", Math.max(0, Math.min(STAMP_SIZES.length - 1, (S().stampSize ?? 2) + dir)));
@@ -1255,6 +1358,37 @@ function saveSelected() {
   refreshInk(p);
 }
 
+// Kopie van de huidige pagina-krabbels op de ongedaan-stapel (items zelf gekopieerd).
+function pushUndo(page) {
+  st.undo.push({ page, before: (st.ink.get(page) || []).map((x) => ({ ...x })) });
+}
+
+async function editSelected() {
+  if (!st.selected || st.selected.item.t !== "text") return;
+  const it = st.selected.item;
+  if ((it.f || "t") === "t" && !it.b) {
+    const t = await promptDlg("Tekst wijzigen", it.v, { placeholder: "bijv. Solo, 2x, adem" });
+    if (!t || !st.selected || st.selected.item !== it) return;
+    pushUndo(st.selected.page);
+    it.v = t;
+    saveSelected();
+    renderToolbar();
+  } else pickStamp(it);
+}
+
+function copySelected() {
+  if (!st.selected) return;
+  const { page, item } = st.selected;
+  const items = st.ink.get(page);
+  pushUndo(page);
+  const off = 0.03;
+  const c = item.t === "text" ? { ...item, x: +(item.x + off).toFixed(4), y: +(item.y + off).toFixed(4) } : { ...item, p: item.p.map((v) => +(v + off).toFixed(4)) };
+  items.push(c);
+  saveInk(st.song.id, page, items);
+  selectStamp({ page, item: c });
+  toast("Kopie gemaakt, sleep hem op zijn plek", 1400);
+}
+
 function deleteSelected() {
   if (!st.selected) return;
   const { page, item } = st.selected;
@@ -1263,6 +1397,7 @@ function deleteSelected() {
   items.splice(items.indexOf(item), 1);
   saveInk(st.song.id, page, items);
   selectStamp(null);
+  toast("Weggehaald", 900);
 }
 
 function pageAt(e) {
@@ -1272,7 +1407,7 @@ function pageAt(e) {
   const box = el._box;
   const fx = (e.clientX - r.left) / r.width;
   const fy = (e.clientY - r.top) / r.height;
-  return { el, page: el._p, x: box.x + fx * box.w, y: box.y + fy * box.h, rect: r };
+  return { el, page: el._p, x: box.x + fx * box.w, y: box.y + fy * box.h, rect: r, cx: e.clientX, cy: e.clientY };
 }
 
 function beginDraw(e) {
@@ -1283,10 +1418,30 @@ function beginDraw(e) {
   const pageW = hit.rect.width / hit.el._box.w; // schermbreedte van de hele pagina
   const before = items.map((x) => ({ ...x }));
 
+  // Geselecteerde krabbel aangeraakt: verslepen (met elk gereedschap behalve de gum).
+  const sel = st.selected && st.selected.page === hit.page ? st.selected.item : null;
+  if (sel && st.tool !== "eraser" && itemAt(hit, [sel])) {
+    const d = startMove(hit, sel, items, before);
+    if (sel.t === "text") showLoupe(d, e.clientX, e.clientY);
+    return d;
+  }
+
+  if (st.tool === "select") {
+    const item = itemAt(hit, items);
+    if (!item) {
+      selectStamp(null);
+      return null; // leeg vlak: gewoon schuiven/omslaan
+    }
+    selectStamp({ page: hit.page, item });
+    const d = startMove(hit, item, items, before);
+    if (item.t === "text") showLoupe(d, e.clientX, e.clientY);
+    return d;
+  }
+
   if (st.tool === "text") {
     // Bestaand teken aangeraakt: selecteren en verslepen. Anders: nieuw teken.
-    const i = hitTest(items.filter((x) => x.t === "text"), hit.x, hit.y, 16 / pageW, hit.el._aspect);
     const texts = items.filter((x) => x.t === "text");
+    const i = hitTest(texts, hit.x, hit.y, 16 / pageW, hit.el._aspect);
     let item;
     if (i >= 0) item = texts[i];
     else {
@@ -1295,10 +1450,12 @@ function beginDraw(e) {
       items.push(item);
     }
     selectStamp({ page: hit.page, item });
-    const d = { stamp: true, page: hit.page, el: hit.el, item, items, before, dx: item.x - hit.x, dy: item.y - hit.y, moved: i < 0 };
+    const d = startMove(hit, item, items, before);
+    d.moved = i < 0; // nieuw teken: altijd bewaren
     showLoupe(d, e.clientX, e.clientY);
     return d;
   }
+  if (sel) selectStamp(null);
   if (st.tool === "eraser") {
     const d = { erase: true, page: hit.page, el: hit.el, items, before, pageW };
     eraseAt(d, hit);
@@ -1308,7 +1465,20 @@ function beginDraw(e) {
   const it = { t: st.tool, c: st.tool === "marker" ? markerColor(S().penColor) : S().penColor, w, p: [hit.x, hit.y] };
   items.push(it);
   refreshInk(hit.page);
-  return { page: hit.page, el: hit.el, it, items, before };
+  const d = { page: hit.page, el: hit.el, it, items, before, x0: e.clientX, y0: e.clientY };
+  // Stil lang indrukken op een bestaande krabbel: die selecteren i.p.v. tekenen.
+  d.lp = setTimeout(() => {
+    d.lp = 0;
+    if (d.done) return;
+    const target = itemAt(hit, items, it);
+    if (!target) return;
+    items.splice(items.indexOf(it), 1);
+    Object.assign(d, startMove(hit, target, items, before));
+    selectStamp({ page: hit.page, item: target });
+    buzz();
+    if (target.t === "text") showLoupe(d, d.x0, d.y0);
+  }, LONG_PRESS);
+  return d;
 }
 
 // ---------- vergrootglas ----------
@@ -1331,9 +1501,10 @@ function showLoupe(d, fingerX, fingerY) {
   const sheet = el._sheet;
   const r = sheet.getBoundingClientRect();
   const box = el._box;
-  // Middelpunt = plek van het teken (niet de vinger zelf).
-  const px = r.left + ((d.item.x - box.x) / box.w) * r.width;
-  const py = r.top + ((d.item.y - box.y) / box.h) * r.height;
+  // Middelpunt = plek van het teken (niet de vinger zelf); bij een lijn de vinger.
+  const c = d.item && d.item.t === "text" ? d.item : d.cur;
+  const px = r.left + ((c.x - box.x) / box.w) * r.width;
+  const py = r.top + ((c.y - box.y) / box.h) * r.height;
   const kx = sheet.width / r.width;
   const ky = sheet.height / r.height;
   const sw = (LOUPE / LOUPE_ZOOM) * kx;
@@ -1385,14 +1556,25 @@ function toPage(d, ev) {
 }
 
 function moveDraw(d, e) {
-  if (d.stamp) {
+  if (d.move) {
     const q = toPage(d, e);
-    d.item.x = +(q.x + d.dx).toFixed(4);
-    d.item.y = +(q.y + d.dy).toFixed(4);
+    const dx = q.x - d.start.x;
+    const dy = q.y - d.start.y;
+    if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) return; // trillen telt niet
+    d.cur = q;
+    const it = d.item;
+    if (it.t === "text") {
+      it.x = +(d.orig.x + dx).toFixed(4);
+      it.y = +(d.orig.y + dy).toFixed(4);
+    } else it.p = d.orig.map((v, i) => +(v + (i % 2 ? dy : dx)).toFixed(4));
     d.moved = true;
     refreshInk(d.page);
     showLoupe(d, e.clientX, e.clientY);
     return;
+  }
+  if (d.lp && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 8) {
+    clearTimeout(d.lp);
+    d.lp = 0;
   }
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   for (const ev of events) {
@@ -1412,20 +1594,24 @@ function eraseAt(d, pt) {
 }
 
 function endDraw(d) {
+  d.done = true;
+  clearTimeout(d.lp);
   hideLoupe();
-  if (d.stamp && !d.moved) return;
+  if (d.move && !d.moved) return renderToolbar();
   if (d.erase && d.items.length === d.before.length) return;
   st.undo.push({ page: d.page, before: d.before });
   saveInk(st.song.id, d.page, d.items);
-  if (d.stamp) renderToolbar();
+  if (d.move) renderToolbar();
 }
 
 // Tweede vinger kwam erbij: het was knijpen, geen tekenen.
 function abortDraw(d) {
+  d.done = true;
+  clearTimeout(d.lp);
   hideLoupe();
-  if (d.stamp || d.erase) {
+  if (d.move || d.erase) {
     st.ink.set(d.page, d.before);
-    if (d.stamp) selectStamp(null);
+    if (d.move) selectStamp(null);
   } else {
     d.items.splice(d.items.indexOf(d.it), 1);
   }

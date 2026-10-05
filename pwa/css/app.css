@@ -1509,11 +1509,17 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
   align-items: stretch !important;
   overflow: visible !important;
   gap: 6px !important;
+  /* absoluut + left:50% krimpt anders tot de halve breedte */
+  width: max-content;
+  max-width: calc(100% - 16px);
 }
 @media (max-width: 460px) {
   .tbtn {
-    width: 40px !important;
+    width: 34px !important;
     height: 42px !important;
+  }
+  .v-tools .trow {
+    gap: 3px;
   }
   .tbtn.done span {
     display: none;
@@ -1524,11 +1530,11 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
     justify-content: center;
   }
   .tcolor {
-    width: 30px !important;
-    height: 30px !important;
+    width: 28px !important;
+    height: 28px !important;
   }
   .tsep {
-    margin: 0 1px !important;
+    display: none;
   }
 }
 .v-tools {
@@ -1562,6 +1568,9 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
 }
 .tbtn.active {
   background: var(--pink);
+}
+.tbtn.tdel {
+  background: #e11d48;
 }
 .tbtn.done {
   width: auto;
@@ -2259,4 +2268,7 @@ textarea {
 }
 .viewer.night .v-loupe {
   filter: invert(1) hue-rotate(180deg);
+}
+.viewer.drawing .v-badge {
+  display: none;
 }

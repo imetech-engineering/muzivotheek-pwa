@@ -71,7 +71,31 @@ export function drawInk(ctx, items, box, w, h, selected = null) {
     if (p.length >= 4) ctx.lineTo(X(p[p.length - 2]), Y(p[p.length - 1]));
     ctx.stroke();
     ctx.restore();
+    if (it === selected) {
+      // Geselecteerde lijn: stippelkader om de hele lijn.
+      const b = strokeBounds(it);
+      const pad = Math.max(6, (it.w * sx) / 2 + 4);
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#c41f6e";
+      ctx.strokeRect(X(b.x0) - pad, Y(b.y0) - pad, X(b.x1) - X(b.x0) + 2 * pad, Y(b.y1) - Y(b.y0) + 2 * pad);
+      ctx.restore();
+    }
   }
+}
+
+// Rand (min/max) van een lijn in paginacoördinaten.
+export function strokeBounds(it) {
+  const p = it.p;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < p.length; i += 2) {
+    x0 = Math.min(x0, p[i]);
+    x1 = Math.max(x1, p[i]);
+    y0 = Math.min(y0, p[i + 1]);
+    y1 = Math.max(y1, p[i + 1]);
+  }
+  return { x0, y0, x1, y1 };
 }
 
 // Index van het item dat het dichtst bij (x,y) ligt binnen straal r, anders -1.
