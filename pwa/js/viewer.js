@@ -648,6 +648,27 @@ function updateChrome() {
 // f is per pagina per nummer instelbaar met de roze greep rechts op de lijn
 // (song.halfSplits[pagina]); standaard 0.5.
 
+// Pagina's waar de halve stap is uitgezet: die slaan direct helemaal om.
+const halfSkipped = (p) => !!(st.song && st.song.halfSkip && st.song.halfSkip[p]);
+
+async function setHalfSkip(p, on) {
+  const m = { ...(st.song.halfSkip || {}) };
+  if (on) m[p] = true;
+  else delete m[p];
+  st.song.halfSkip = m;
+  await saveSong(st.song);
+}
+
+// Halve stap voor pagina p weer aan en die meteen laten zien.
+async function restoreHalf(p) {
+  if (!st.open) return;
+  await setHalfSkip(p, false);
+  st.page = p;
+  st.half = p < st.pages;
+  render();
+  toast("Halve stap weer aan", 1200);
+}
+
 const halfSplit = (p) => {
   const v = st.song.halfSplits && st.song.halfSplits[p];
   return typeof v === "number" ? v : 0.5;
@@ -660,7 +681,9 @@ function buildHalf(cur, nxt) {
   const nxtPart = h("div", { class: "v-halfpart" }, nxt);
   const line = h("div", { class: "v-halfline" });
   const grip = h("div", { class: "v-halfgrip", role: "slider", "aria-label": "Scheiding verschuiven", html: '<i></i><i></i><i></i>' });
-  line.append(grip);
+  const hint = h("div", { class: "v-halfhint" }, "Loslaten: deze pagina meteen helemaal omslaan");
+  line.append(grip, hint);
+  if (nextTop) comp.classList.add("next-top");
   comp.append(...(nextTop ? [nxtPart, line, curPart] : [curPart, line, nxtPart]));
   comp.style.width = Math.max(cur._w, nxt._w) + "px";
   const layout = (f) => {
@@ -680,7 +703,7 @@ function buildHalf(cur, nxt) {
     e.stopPropagation();
     e.preventDefault();
     grip.setPointerCapture(e.pointerId);
-    drag = { y: e.clientY, f };
+    drag = { y: e.clientY, f, armed: false };
     comp.classList.add("dragging");
   });
   grip.addEventListener("pointermove", (e) => {
@@ -689,14 +712,42 @@ function buildHalf(cur, nxt) {
     const dy = (e.clientY - drag.y) / cam.z;
     // Lijn omlaag: bij "deze pagina boven" wordt dat deel groter (f kleiner).
     const nf = nextTop ? drag.f + dy / nxt._h : drag.f - dy / cur._h;
-    f = Math.min(0.9, Math.max(0.1, nf));
+    // Helemaal tegen de rand (volgende pagina vult alles): halve stap overslaan.
+    f = Math.min(1, Math.max(0.1, nf));
+    const armed = f >= 0.96;
+    if (armed !== drag.armed) {
+      drag.armed = armed;
+      comp.classList.toggle("skip-armed", armed);
+      if (armed) {
+        try {
+          navigator.vibrate && navigator.vibrate(30);
+        } catch (err) {}
+      }
+    }
     layout(f);
   });
   const end = async (e) => {
     if (!drag) return;
     e.stopPropagation();
+    const armed = drag.armed && e.type !== "pointercancel";
     drag = null;
-    comp.classList.remove("dragging");
+    comp.classList.remove("dragging", "skip-armed");
+    if (armed) {
+      const p = st.page;
+      const songId = st.song.id;
+      await setHalfSkip(p, true);
+      st.half = false;
+      st.page = p + 1;
+      turnAnim(1);
+      render();
+      toast(`Pagina ${p} slaat nu direct om`, 6000, {
+        label: "Ongedaan",
+        run: () => st.open && st.song.id === songId && restoreHalf(p),
+      });
+      return;
+    }
+    f = Math.min(0.9, f);
+    layout(f);
     st.song.halfSplits = { ...(st.song.halfSplits || {}), [st.page]: +f.toFixed(3) };
     await saveSong(st.song);
     toast("Onthouden voor deze pagina", 1200);
@@ -733,7 +784,7 @@ export function next() {
   const mode = root().dataset.mode;
   if (mode === "scroll") return scrollBy(1);
   if (cam.z > 1.01 && panPage(1)) return;
-  if (S().halfTurn && mode === "single" && !st.half && st.page < st.pages) {
+  if (S().halfTurn && mode === "single" && !st.half && st.page < st.pages && !halfSkipped(st.page)) {
     st.half = true;
     return render();
   }
@@ -2181,10 +2232,13 @@ function renderMore(p) {
     render();
     redraw();
   };
+  // Halve stap hier (of op de vorige pagina) uitgezet? Tegel om hem terug te zetten.
+  const skipP = !S().halfTurn ? 0 : halfSkipped(st.page) ? st.page : !st.half && halfSkipped(st.page - 1) ? st.page - 1 : 0;
   const tiles = h(
     "div",
     { class: "more-grid" },
     tile("half", "Halve pagina", S().halfTurn, toggleHalf),
+    skipP ? tile("undo", `Half terug (p. ${skipP})`, false, () => { closePanels(); restoreHalf(skipP); }) : null,
     S().halfTurn ? tile("repeat", "Helften wisselen", false, () => { setSetting("halfOrder", S().halfOrder === "nextTop" ? "curTop" : "nextTop"); if (st.page < st.pages) st.half = true; render(); }) : null,
     tile("info", "Pagina­nummer", S().pageBadge, () => { setSetting("pageBadge", !S().pageBadge); updateBadge($("#v-count").textContent); if (S().pageBadge) toast("Sleep om te verplaatsen, tik voor groter", 2500); redraw(); }),
     tile("crop", "Randen weg", S().autoCrop, () => { setSetting("autoCrop", !S().autoCrop); st.cache.clear(); render(); redraw(); }),

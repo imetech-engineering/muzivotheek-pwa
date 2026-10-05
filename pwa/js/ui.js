@@ -50,9 +50,23 @@ document.addEventListener("focusin", (e) => {
 });
 
 let toastTimer = 0;
-export function toast(msg, ms = 2200) {
+// action: optioneel {label, run} → knop in de melding (bijv. "Ongedaan").
+export function toast(msg, ms = 2200, action = null) {
   const t = $("#toast");
   t.textContent = msg;
+  t.classList.toggle("has-action", !!action);
+  if (action) {
+    t.append(
+      h("button", {
+        type: "button",
+        class: "toast-act",
+        onclick: () => {
+          t.classList.remove("show");
+          action.run();
+        },
+      }, action.label)
+    );
+  }
   t.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), ms);
