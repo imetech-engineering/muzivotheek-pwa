@@ -246,7 +246,7 @@ async function browse(src) {
     } else {
       const shown = items.filter((it) => it.folder || isPdf(it));
       rows = await Promise.all(shown.map((it) => row(it, path())));
-      if (!shown.length) rows = [h("p", { class: "muted center pad" }, "Geen PDF's in deze map.")];
+      if (!shown.length) rows = [h("p", { class: "muted center pad" }, "Geen bladmuziek in deze map.")];
     }
     if (my !== drawId) return;
     fill(list, ...rows);

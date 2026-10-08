@@ -5,7 +5,7 @@
 
 import { db } from "./db.js";
 import { loadPdf, renderPage, pageAspect, findContentBox } from "./pdf.js";
-import { getSong, saveSong, markOpened } from "./library.js";
+import { getSong, saveSong, markOpened, rotatePages } from "./library.js";
 import { getSetlist } from "./setlists.js";
 import { settings, setSetting } from "./settings.js";
 import { loadInk, saveInk, drawInk, hitTest, strokeBounds, STAMP_GROUPS, STAMP_SIZES, COLORS, YELLOW, loadMusicFont } from "./ink.js";
@@ -2087,6 +2087,40 @@ export async function attachAudio(song, file) {
   await saveSong(song);
 }
 
+// ---------- draaien ----------
+
+// Zichtbare pagina('s) of alle pagina's 90° draaien in het bestand zelf.
+async function rotateView(turns) {
+  if (st.rotating || !st.song) return;
+  st.rotating = true;
+  try {
+    const mode = effectiveMode();
+    const last = mode === "double" ? Math.min(st.pages, st.page + 1) : st.half ? Math.min(st.pages, st.page + 1) : st.page;
+    const pages = st.rotAll ? Array.from({ length: st.pages }, (_, i) => i + 1) : Array.from({ length: last - st.page + 1 }, (_, i) => st.page + i);
+    const id = st.song.id;
+    st.song = await rotatePages(id, pages, turns);
+    const blob = await db.get("files", id);
+    if (!st.open || !st.song || st.song.id !== id) return;
+    st.doc.destroy();
+    st.doc = await loadPdf(blob);
+    for (const p of pages) {
+      st.boxes.delete(p);
+      st.aspects.delete(p);
+      st.ink.delete(p);
+    }
+    st.cache.clear();
+    st.undo = [];
+    selectStamp(null);
+    cam.x = cam.y = 0;
+    cam.z = 1;
+    await render();
+  } catch (e) {
+    toast(e.message || "Draaien lukt niet");
+  } finally {
+    st.rotating = false;
+  }
+}
+
 // ---------- scrollstand ----------
 
 // Snelknop: gewone scrollstand aan/uit (terug naar de vorige weergave).
@@ -2238,6 +2272,13 @@ function renderMore(p) {
     tile("moon", "Nacht", S().nightSheet, () => { setSetting("nightSheet", !S().nightSheet); render(); redraw(); }),
     tile("pen", "Krabbels", S().showNotes, () => { setSetting("showNotes", !S().showNotes); document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk); redraw(); })
   );
+  const turn = h(
+    "div",
+    { class: "more-row" },
+    h("button", { type: "button", class: "round", "aria-label": "Linksom draaien", onclick: () => rotateView(-1), html: icon("turnL") }),
+    h("span", { class: "more-label" }, st.rotAll && st.pages > 1 ? "Draaien: alles" : "Draaien"),
+    h("button", { type: "button", class: "round", "aria-label": "Rechtsom draaien", onclick: () => rotateView(1), html: icon("turnR") })
+  );
   const zoom = h(
     "div",
     { class: "more-row" },
@@ -2261,7 +2302,8 @@ function renderMore(p) {
       document.dispatchEvent(new CustomEvent("edit-song", { detail: { id: st.song.id, onSaved: async () => { st.song = await getSong(st.song.id); updateChrome(); setupAudio(); } } }));
     })
   );
-  fill(p, panelHead("Weergave"), modes, tiles, zoom, actions);
+  const turnAll = st.pages > 1 ? h("div", { class: "more-grid" }, tile("copy", "Draai alle pagina's", !!st.rotAll, () => { st.rotAll = !st.rotAll; redraw(); })) : null;
+  fill(p, panelHead("Weergave"), modes, tiles, turn, turnAll, zoom, actions);
 }
 
 export const viewerOpen = () => st.open;

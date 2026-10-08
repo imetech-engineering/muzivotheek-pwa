@@ -5,6 +5,7 @@ import { loadPdf, makeThumb } from "./pdf.js";
 import { parseFileName, isGarbageName } from "./names.js";
 import { imagesToPdf, isImageFile } from "./imgpdf.js";
 import { queueRecognize } from "./recognize.js";
+import { rotateItems, rotatePoint } from "./ink.js";
 
 let songs = null; // cache: Map id -> song
 
@@ -267,6 +268,44 @@ export async function mergeSongs(ids, title) {
   await replaceFile(base, merged, null);
   for (const s of list.slice(1)) await deleteSong(s.id);
   return base;
+}
+
+// Pagina's echt draaien in het bestand (90° per keer; turns +1 rechtsom, -1 linksom).
+// Krabbels en sprongen op die pagina's draaien mee, zodat ze op dezelfde plek blijven.
+export async function rotatePages(id, pages, turns) {
+  const song = await getSong(id);
+  if (!song) throw new Error("Nummer niet gevonden");
+  const { PDFDocument, degrees } = await pdfLib();
+  const blob = await db.get("files", id);
+  let pdf;
+  try {
+    pdf = await PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true });
+  } catch (e) {
+    throw new Error("Deze PDF kan niet gedraaid worden (beveiligd of beschadigd)");
+  }
+  const all = pdf.getPages();
+  const aspects = new Map();
+  for (const p of pages) {
+    const pg = all[p - 1];
+    if (!pg) continue;
+    const { width, height } = pg.getSize();
+    const rot = ((pg.getRotation().angle % 360) + 360) % 360;
+    aspects.set(p, rot % 180 === 90 ? width / height : height / width);
+    pg.setRotation(degrees((((rot + turns * 90) % 360) + 360) % 360));
+  }
+  const out = new Blob([await pdf.save()], { type: "application/pdf" });
+  for (const [p, a] of aspects) {
+    const key = id + ":" + p;
+    const items = await db.get("notes", key);
+    if (items && items.length) await db.put("notes", key, rotateItems(items, turns, a));
+  }
+  song.links = (song.links || []).map((l) => {
+    if (!aspects.has(l.page)) return l;
+    const [x, y] = rotatePoint(l.x, l.y, turns);
+    return { ...l, x: +x.toFixed(4), y: +y.toFixed(4) };
+  });
+  await replaceFile(song, out, song.srcVersion);
+  return song;
 }
 
 // Extra PDF('s) of foto's achteraan een bestaand nummer toevoegen.

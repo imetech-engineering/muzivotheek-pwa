@@ -203,3 +203,27 @@ export const STAMP_SIZES = [0.02, 0.03, 0.045, 0.065, 0.09];
 
 export const YELLOW = "#ffe600"; // fel geel (markeerstift)
 export const COLORS = [YELLOW, "#e11d48", "#2563eb", "#111111", "#16a34a", "#f59e0b", "#9333ea"];
+
+// Krabbels meedraaien als de pagina 90° gedraaid wordt. turns: +1 rechtsom, -1 linksom.
+// aspect = hoogte/breedte van de pagina vóór het draaien. Lengtes (dikte, tekengrootte)
+// zijn ten opzichte van de paginabreedte, die bij draaien verandert.
+export function rotateItems(items, turns, aspect) {
+  const pt = turns > 0 ? (x, y) => [1 - y, x] : (x, y) => [y, 1 - x];
+  const k = 1 / aspect;
+  return items.map((it) => {
+    if (it.t === "text") {
+      const [x, y] = pt(it.x, it.y);
+      return { ...it, x: +x.toFixed(4), y: +y.toFixed(4), s: +(it.s * k).toFixed(5) };
+    }
+    const p = [];
+    for (let i = 0; i < it.p.length; i += 2) {
+      const [x, y] = pt(it.p[i], it.p[i + 1]);
+      p.push(+x.toFixed(4), +y.toFixed(4));
+    }
+    return { ...it, p, w: +(it.w * k).toFixed(5) };
+  });
+}
+
+export function rotatePoint(x, y, turns) {
+  return turns > 0 ? [1 - y, x] : [y, 1 - x];
+}

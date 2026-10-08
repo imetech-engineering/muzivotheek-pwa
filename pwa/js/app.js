@@ -210,8 +210,8 @@ async function renderSongs() {
           { class: "empty" },
           h("div", { class: "empty-ic", html: icon("music") }),
           h("h2", {}, "Nog geen bladmuziek"),
-          h("p", {}, "Voeg PDF's toe vanaf je apparaat."),
-          h("button", { type: "button", class: "btn primary big", onclick: pickFiles, html: icon("plus") + "<span>PDF's toevoegen</span>" }),
+          h("p", {}, "Kies PDF's of foto's van je apparaat."),
+          h("button", { type: "button", class: "btn primary big", onclick: pickFiles, html: icon("plus") + "<span>Muziek toevoegen</span>" }),
           canLinkFolder() || canPickFolderOnce() || spConfigured()
             ? h("div", {}, h("button", { type: "button", class: "btn big second", onclick: addMenu, html: icon("folder") + `<span>${spConfigured() ? "Of uit SharePoint / een map" : "Of een hele map"}</span>` }))
             : null
@@ -697,12 +697,12 @@ document.addEventListener("edit-song", (e) => editSong(e.detail.id, e.detail.onS
 
 // Plus-knop: kiezen hoe je nummers toevoegt.
 async function addMenu() {
-  const items = [{ label: "PDF's kiezen", value: "files", icon: icon("upload") }];
+  const items = [{ label: "PDF of foto kiezen", value: "files", icon: icon("upload") }];
   if (spConfigured()) items.push({ label: "Uit SharePoint", value: "sp", icon: icon("link") });
   if (canLinkFolder()) items.push({ label: "Map koppelen (blijft bijgewerkt)", value: "link", icon: icon("folder") });
   else if (canPickFolderOnce()) items.push({ label: "Hele map toevoegen", value: "once", icon: icon("folder") });
   if (items.length === 1) return pickFiles();
-  const v = await menu("Nummers toevoegen", items);
+  const v = await menu("Muziek toevoegen", items);
   if (v === "files") pickFiles();
   if (v === "sp") openSharePoint();
   if (v === "once") importFiles(await pickFolderOnce());
@@ -750,7 +750,7 @@ function pickFiles() {
 async function importFiles(files) {
   let items = files.map((f) => (f instanceof Blob ? { file: f, folder: null } : f));
   items = items.filter(({ file: f }) => isPdfFile(f) || isImageFile(f));
-  if (!items.length) return toast("Kies PDF's of foto's");
+  if (!items.length) return toast("Kies een PDF of foto");
   let defFolder = "";
   if (items.length > 1 && state.filter.startsWith("map:")) defFolder = state.filter.slice(4);
   // Meerdere foto's: één nummer met meerdere pagina's, of elke foto apart?
@@ -1070,7 +1070,7 @@ function enableDrag(container, onMove) {
 async function pickSongs(title, already = []) {
   const all = sortSongs(await allSongs(), "title");
   if (!all.length) {
-    toast("Voeg eerst PDF's toe");
+    toast("Voeg eerst muziek toe");
     return [];
   }
   const chosen = [];
@@ -1369,7 +1369,7 @@ async function renderSettings() {
               )
             )
           ),
-          h("p", { class: "set-s pad-x" }, "Nieuwe PDF's komen er vanzelf bij."),
+          h("p", { class: "set-s pad-x" }, "Nieuwe bestanden komen er vanzelf bij."),
           canLinkFolder()
             ? h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", onclick: async () => { try { const src = await linkFolder(); await runFolderSync(() => syncFolder(src, progressText), `Map "${src.name}" gekoppeld`); renderSettings(); } catch (e) { if (e.name !== "AbortError") toast("Map koppelen mislukt"); } }, html: icon("folder") + "<span>Map koppelen</span>" }))
             : null
