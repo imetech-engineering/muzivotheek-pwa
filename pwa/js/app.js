@@ -1354,7 +1354,7 @@ async function renderSettings() {
     group(
       "Opslag & back-up",
       h("div", { class: "set-row" }, h("div", {}, h("div", { class: "set-l" }, `${songs.length} ${songs.length === 1 ? "nummer" : "nummers"}, ${lists.length} ${lists.length === 1 ? "lijst" : "lijsten"}`), h("div", { class: "set-s" }, est ? `${fmtBytes(est.usage)} gebruikt` + (persisted ? " · vastgezet ✓" : "") : ""))),
-      h("p", { class: "set-s pad-x" }, "Alles staat alleen op dit apparaat. Maak af en toe een back-up."),
+      h("p", { class: "set-s pad-x" }, "Alles staat alleen op dit apparaat. " + backupAgo() + ". Je krijgt elke 2 weken een herinnering."),
       h(
         "div",
         { class: "btn-row" },
@@ -1395,6 +1395,33 @@ async function manualUpdateCheck(e) {
   }
 }
 
+const BACKUP_EVERY_DAYS = 14;
+
+function markBackup() {
+  setSetting("lastBackup", Date.now());
+}
+
+function backupAgo() {
+  const t = S().lastBackup;
+  if (!t) return "Nog nooit een back-up gemaakt";
+  const d = Math.floor((Date.now() - t) / 86400000);
+  return "Laatste back-up: " + (d <= 0 ? "vandaag" : d === 1 ? "gisteren" : `${d} dagen geleden`);
+}
+
+// Herinnering: na 2 weken zonder back-up (en niet vaker dan om de 3 dagen).
+function maybeRemindBackup(count) {
+  if (!count || viewerOpen()) return;
+  const now = Date.now();
+  const s = S();
+  const since = s.lastBackup || 0;
+  if (since && now - since < BACKUP_EVERY_DAYS * 86400000) return;
+  if (s.backupNagAt && now < s.backupNagAt) return;
+  // Nieuwe gebruiker zonder back-up: pas na een paar dagen vragen.
+  if (!since && !s.backupNagAt) return setSetting("backupNagAt", now + 3 * 86400000);
+  setSetting("backupNagAt", now + 3 * 86400000);
+  toast(since ? "Tijd voor een back-up van je krabbels en lijsten" : "Je hebt nog geen back-up gemaakt", 15000, { label: "Nu maken", run: backup });
+}
+
 async function backup() {
   const prog = $("#progress");
   prog.hidden = false;
@@ -1407,22 +1434,44 @@ async function backup() {
     const name = `muzivotheek-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}.zip`;
     const file = new File([blob], name, { type: "application/zip" });
     prog.hidden = true;
-    // Op telefoon/tablet: via Delen naar Drive/OneDrive/mail. Anders downloaden.
-    if (navigator.canShare && navigator.canShare({ files: [file] }) && matchMedia("(pointer: coarse)").matches) {
-      const how = await menu("Back-up (" + fmtBytes(blob.size) + ")", [
-        { label: "Delen (Drive, OneDrive, mail…)", value: "share", icon: icon("share") },
-        { label: "Opslaan in Downloads", value: "dl", icon: icon("download") },
-      ]);
-      if (how === "share") {
-        try {
-          await navigator.share({ files: [file], title: name });
-        } catch (e) {}
-        return;
+    const saveLocal = () => {
+      downloadBlob(blob, name);
+      markBackup();
+      toast("Back-up staat in Downloads", 2500);
+    };
+    const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+    if (!canShare) return saveLocal();
+    // Delen direct vanuit de knop (anders weigert Android het soms), fouten tonen we.
+    const doShare = async () => {
+      try {
+        await navigator.share({ files: [file], title: name });
+        markBackup();
+        toast("Back-up gedeeld. Controleer even of hij in Drive/OneDrive staat.", 4000);
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+        console.error(e);
+        saveLocal();
+        toast(`Delen lukte niet (${(e && e.name) || "fout"}). De back-up staat wel in Downloads.`, 5000);
       }
-      if (how !== "dl") return;
-    }
-    downloadBlob(blob, name);
-    toast("Back-up opgeslagen");
+    };
+    const back = h("div", { class: "dlg-back show" });
+    const close = () => back.remove();
+    back.append(
+      h(
+        "div",
+        { class: "dlg", role: "dialog", "aria-modal": "true" },
+        h("h2", { class: "dlg-title" }, "Back-up klaar"),
+        h("div", { class: "dlg-body" }, h("p", {}, `${fmtBytes(blob.size)}. Bewaar hem buiten dit apparaat, bijvoorbeeld in Drive of OneDrive.`)),
+        h(
+          "div",
+          { class: "dlg-btns" },
+          h("button", { type: "button", class: "btn", onclick: close }, "Sluiten"),
+          h("button", { type: "button", class: "btn", onclick: () => { close(); saveLocal(); } }, "Downloads"),
+          h("button", { type: "button", class: "btn primary", onclick: () => { close(); doShare(); } }, "Delen")
+        )
+      )
+    );
+    document.body.append(back);
   } catch (e) {
     prog.hidden = true;
     console.error(e);
@@ -1527,6 +1576,7 @@ function init() {
   }
   allSongs().then(async (s) => {
     if (s.length) persistStorage();
+    maybeRemindBackup(s.length);
     // Eenmalig: eerder foutief herkende (lange/rare) namen weer leegmaken.
     try {
       if (!localStorage.getItem("muzivotheek.cleanRecog1")) {

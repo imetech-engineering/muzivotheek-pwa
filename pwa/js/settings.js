@@ -26,6 +26,8 @@ export const DEFAULTS = {
   pageBadgePos: { x: 0.93, y: 0.86 },
   penColor: "#e11d48",
   penWidth: 3,
+  lastBackup: 0, // tijdstip laatste back-up (ms)
+  backupNagAt: 0, // niet eerder herinneren dan dit tijdstip
   scrollFill: false, // scrollstand: pagina vult de schermbreedte
   metroSound: true,
   metroFlash: true,

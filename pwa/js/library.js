@@ -9,12 +9,25 @@ import { rotateItems, rotatePoint } from "./ink.js";
 
 let songs = null; // cache: Map id -> song
 
+let loading = null;
+
 export async function allSongs() {
   if (!songs) {
-    songs = new Map();
-    const keys = await db.keys("songs");
-    const vals = await db.all("songs");
-    keys.forEach((k, i) => songs.set(k, vals[i]));
+    // Gelijktijdige aanroepen wachten op dezelfde lading (anders zie je even een lege lijst).
+    loading =
+      loading ||
+      (async () => {
+        const keys = await db.keys("songs");
+        const vals = await db.all("songs");
+        const m = new Map();
+        keys.forEach((k, i) => m.set(k, vals[i]));
+        songs = m;
+      })();
+    try {
+      await loading;
+    } finally {
+      loading = null;
+    }
   }
   return [...songs.values()];
 }
