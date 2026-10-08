@@ -1440,7 +1440,6 @@ async function backup() {
       toast("Back-up staat in Downloads", 2500);
     };
     const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
-    if (!canShare) return saveLocal();
     // Delen direct vanuit de knop (anders weigert Android het soms), fouten tonen we.
     const doShare = async () => {
       try {
@@ -1466,8 +1465,8 @@ async function backup() {
           "div",
           { class: "dlg-btns" },
           h("button", { type: "button", class: "btn", onclick: close }, "Sluiten"),
-          h("button", { type: "button", class: "btn", onclick: () => { close(); saveLocal(); } }, "Downloads"),
-          h("button", { type: "button", class: "btn primary", onclick: () => { close(); doShare(); } }, "Delen")
+          h("button", { type: "button", class: "btn" + (canShare ? "" : " primary"), onclick: () => { close(); saveLocal(); } }, "In Downloads zetten"),
+          canShare ? h("button", { type: "button", class: "btn primary", onclick: () => { close(); doShare(); } }, "Delen") : null
         )
       )
     );

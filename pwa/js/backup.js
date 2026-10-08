@@ -14,13 +14,25 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
-function crc32(bytes) {
-  let c = 0xffffffff;
+// CRC32 in stukken: past een grote PDF/mp3 niet in het geheugen hoeft.
+function crcUpdate(c, bytes) {
   for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
+  return c;
 }
 
 const enc = new TextEncoder();
+const CHUNK = 4 * 1024 * 1024;
+
+// Geeft { part, size, crc }. Blobs gaan als verwijzing in de zip (niet gekopieerd naar het geheugen).
+async function prep(data) {
+  if (data instanceof Blob) {
+    let c = 0xffffffff;
+    for (let off = 0; off < data.size; off += CHUNK) c = crcUpdate(c, new Uint8Array(await data.slice(off, off + CHUNK).arrayBuffer()));
+    return { part: data, size: data.size, crc: (c ^ 0xffffffff) >>> 0 };
+  }
+  const bytes = typeof data === "string" ? enc.encode(data) : data;
+  return { part: bytes, size: bytes.length, crc: (crcUpdate(0xffffffff, bytes) ^ 0xffffffff) >>> 0 };
+}
 
 async function makeZip(entries, onProgress) {
   const parts = [];
@@ -28,31 +40,31 @@ async function makeZip(entries, onProgress) {
   let offset = 0;
   let i = 0;
   for (const { name, data } of entries) {
-    const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : typeof data === "string" ? enc.encode(data) : data;
+    const { part, size, crc } = await prep(data);
     const nameB = enc.encode(name);
-    const crc = crc32(bytes);
     const lh = new DataView(new ArrayBuffer(30));
     lh.setUint32(0, 0x04034b50, true);
     lh.setUint16(4, 20, true);
     lh.setUint16(6, 0x0800, true); // utf-8 namen
     lh.setUint16(8, 0, true);
     lh.setUint32(14, crc, true);
-    lh.setUint32(18, bytes.length, true);
-    lh.setUint32(22, bytes.length, true);
+    lh.setUint32(18, size, true);
+    lh.setUint32(22, size, true);
     lh.setUint16(26, nameB.length, true);
-    parts.push(lh.buffer, nameB, bytes);
+    parts.push(lh.buffer, nameB, part);
     const ch = new DataView(new ArrayBuffer(46));
     ch.setUint32(0, 0x02014b50, true);
     ch.setUint16(4, 20, true);
     ch.setUint16(6, 20, true);
     ch.setUint16(8, 0x0800, true);
     ch.setUint32(16, crc, true);
-    ch.setUint32(20, bytes.length, true);
-    ch.setUint32(24, bytes.length, true);
+    ch.setUint32(20, size, true);
+    ch.setUint32(24, size, true);
     ch.setUint16(28, nameB.length, true);
     ch.setUint32(42, offset, true);
     central.push(ch.buffer, nameB);
-    offset += 30 + nameB.length + bytes.length;
+    offset += 30 + nameB.length + size;
+    if (offset > 3.8e9) throw new Error("De back-up is te groot (meer dan 4 GB)");
     onProgress && onProgress(++i, entries.length);
   }
   const cdSize = central.reduce((s, p) => s + (p.byteLength ?? p.length), 0);
@@ -65,21 +77,27 @@ async function makeZip(entries, onProgress) {
   return new Blob([...parts, ...central, end.buffer], { type: "application/zip" });
 }
 
+// Leest alleen het inhoudsoverzicht; de bestanden zelf blijven stukken (slices) van het back-upbestand.
 async function readZip(blob) {
-  const buf = new Uint8Array(await blob.arrayBuffer());
-  const dv = new DataView(buf.buffer);
+  const tailLen = Math.min(blob.size, 65557);
+  const tail = new Uint8Array(await blob.slice(blob.size - tailLen).arrayBuffer());
+  const tdv = new DataView(tail.buffer);
   let eocd = -1;
-  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
-    if (dv.getUint32(i, true) === 0x06054b50) {
+  for (let i = tail.length - 22; i >= 0; i--) {
+    if (tdv.getUint32(i, true) === 0x06054b50) {
       eocd = i;
       break;
     }
   }
   if (eocd < 0) throw new Error("Geen geldig back-upbestand");
-  const count = dv.getUint16(eocd + 10, true);
-  let p = dv.getUint32(eocd + 16, true);
+  const count = tdv.getUint16(eocd + 10, true);
+  const cdSize = tdv.getUint32(eocd + 12, true);
+  const cdStart = tdv.getUint32(eocd + 16, true);
+  const cd = new Uint8Array(await blob.slice(cdStart, cdStart + cdSize).arrayBuffer());
+  const dv = new DataView(cd.buffer);
   const dec = new TextDecoder();
   const out = new Map();
+  let p = 0;
   for (let i = 0; i < count; i++) {
     if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("Back-up is beschadigd");
     const method = dv.getUint16(p + 10, true);
@@ -88,12 +106,11 @@ async function readZip(blob) {
     const xlen = dv.getUint16(p + 30, true);
     const clen = dv.getUint16(p + 32, true);
     const lho = dv.getUint32(p + 42, true);
-    const name = dec.decode(buf.subarray(p + 46, p + 46 + nlen));
+    const name = dec.decode(cd.subarray(p + 46, p + 46 + nlen));
     if (method !== 0) throw new Error("Back-up is ingepakt met een ander programma");
-    const lnlen = dv.getUint16(lho + 26, true);
-    const lxlen = dv.getUint16(lho + 28, true);
-    const start = lho + 30 + lnlen + lxlen;
-    out.set(name, buf.subarray(start, start + size));
+    const lh = new DataView(await blob.slice(lho, lho + 30).arrayBuffer());
+    const start = lho + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+    out.set(name, blob.slice(start, start + size));
     p += 46 + nlen + xlen + clen;
   }
   return out;
@@ -135,9 +152,9 @@ export async function exportBackup(onProgress) {
 // mode: "merge" (bij bestaande voegen) of "replace" (alles vervangen)
 export async function importBackup(file, mode = "merge") {
   const files = await readZip(file);
-  const metaBytes = files.get("muzivotheek.json");
-  if (!metaBytes) throw new Error("Dit is geen MuzIVOtheek-back-up");
-  const meta = JSON.parse(new TextDecoder().decode(metaBytes));
+  const metaBlob = files.get("muzivotheek.json");
+  if (!metaBlob) throw new Error("Dit is geen MuzIVOtheek-back-up");
+  const meta = JSON.parse(await metaBlob.text());
   if (mode === "replace") {
     for (const s of ["songs", "files", "thumbs", "notes", "audio", "setlists"]) await db.clear(s);
   }
@@ -145,7 +162,7 @@ export async function importBackup(file, mode = "merge") {
   for (const s of meta.songs || []) {
     const pdf = files.get(`pdf/${s.id}.pdf`);
     if (!pdf) continue;
-    await db.put("files", s.id, new Blob([pdf], { type: "application/pdf" }));
+    await db.put("files", s.id, pdf.slice(0, pdf.size, "application/pdf"));
     await db.put("songs", s.id, s);
     n++;
   }
@@ -153,7 +170,7 @@ export async function importBackup(file, mode = "merge") {
   for (const [k, v] of Object.entries(meta.notes || {})) await db.put("notes", k, v);
   for (const a of meta.audio || []) {
     const b = files.get(`audio/${a.id}`);
-    if (b) await db.put("audio", a.id, { blob: new Blob([b], { type: a.type || "audio/mpeg" }), name: a.name, type: a.type });
+    if (b) await db.put("audio", a.id, { blob: b.slice(0, b.size, a.type || "audio/mpeg"), name: a.name, type: a.type });
   }
   if (meta.settings && mode === "replace") {
     try {
@@ -171,5 +188,5 @@ export function downloadBlob(blob, name) {
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  setTimeout(() => URL.revokeObjectURL(a.href), 600000);
 }
