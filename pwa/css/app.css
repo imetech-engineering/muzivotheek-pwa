@@ -1707,26 +1707,36 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
 .v-scrollpill {
   position: absolute;
   z-index: 9;
-  right: 16px;
+  left: 16px;
   bottom: calc(24px + var(--safe-b));
+  transition: bottom 0.2s;
+}
+.viewer.chrome .v-scrollpill {
+  bottom: calc(84px + var(--safe-b));
+}
+.scrollfill {
   display: flex;
   align-items: center;
-  gap: 2px;
-  background: rgba(22, 24, 32, 0.9);
-  color: #fff;
-  border-radius: 26px;
-  padding: 2px 6px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.v-scrollpill .vbtn {
-  font-size: 22px;
-  min-width: 44px;
+  gap: 8px;
   height: 48px;
+  padding: 0 16px 0 12px;
+  border: 0;
+  border-radius: 24px;
+  background: rgba(22, 24, 32, 0.82);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
-.v-scrollpill span {
-  min-width: 28px;
-  text-align: center;
+.scrollfill .ic {
+  width: 24px;
+  height: 24px;
+}
+.scrollfill.on {
+  background: var(--pink);
+}
+.v-scrollbtn.on {
+  color: var(--pink);
 }
 
 @media (min-width: 900px) {

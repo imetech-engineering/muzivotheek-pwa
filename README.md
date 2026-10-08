@@ -16,7 +16,7 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
 - **Lezer**: volledig scherm, scherm blijft aan, één/twee/automatisch pagina's of doorlopend scrollen,
   halve pagina omslaan (volgorde instelbaar), witte randen wegsnijden, nachtstand.
   Zoomen via één camera-transform: knijpen, twee vingers schuiven, dubbeltik; niets verspringt.
-- **Omslaan**: tik rechts/links, vegen, bluetooth-pedaal (PageUp/PageDown/pijltjes), auto-scroll.
+- **Omslaan**: tik rechts/links, vegen, bluetooth-pedaal (PageUp/PageDown/pijltjes), of gewoon scrollen (optioneel schermbreed).
 - **Krabbels**: pen, markeerstift, muzieksymbolen (Noto Music, OFL) met instelbare grootte,
   verslepen, eigen tekst, gum, ongedaan maken.
 - **Bladwijzers en sprongen**: sprong-knopjes op de pagina voor herhalingen/D.S./coda, met *Terug*.

@@ -1292,6 +1292,7 @@ async function renderSettings() {
       "Weergave",
       select("theme", "Thema", [["auto", "Automatisch"], ["light", "Licht"], ["dark", "Donker"]]),
       select("viewMode", "Weergave", [["single", "1 pagina"], ["double", "2 pagina's"], ["auto", "Automatisch"], ["scroll", "Scrollen"]]),
+      toggle("scrollFill", "Scrollen: schermbreed", "Pagina vult de hele breedte"),
       toggle("halfTurn", "Halve pagina omslaan"),
       select("halfOrder", "Halve pagina boven", [["curTop", "Deze pagina"], ["nextTop", "Volgende"]]),
       toggle("autoCrop", "Witte randen weg"),
@@ -1305,8 +1306,7 @@ async function renderSettings() {
       toggle("tapZones", "Tikken aan de zijkant"),
       toggle("tapLeftPrev", "Links = terug"),
       toggle("swipe", "Vegen"),
-      toggle("pedalSwap", "Pedaal omdraaien"),
-      select("scrollSpeed", "Scrollsnelheid", [[10, "Heel langzaam"], [20, "Langzaam"], [30, "Normaal"], [50, "Snel"], [80, "Heel snel"]], Number)
+      toggle("pedalSwap", "Pedaal omdraaien")
     ),
     group(
       "Herkennen",

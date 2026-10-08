@@ -1,6 +1,6 @@
 // Volledig-scherm lezer voor één nummer (of een afspeellijst).
 //
-// Bladeren: tik rechts/links, veeg, pedaal (toetsen), of auto-scroll.
+// Bladeren: tik rechts/links, veeg, pedaal (toetsen), of gewoon scrollen.
 // Midden tikken toont/verbergt de knoppen. Knijpen of dubbeltik = zoomen.
 
 import { db } from "./db.js";
@@ -36,7 +36,7 @@ const st = {
   selected: null, // geselecteerd teken {page, item}
   undo: [],
   returnPage: 0,
-  autoScroll: false,
+  prevMode: null, // weergave vóór de snelknop Scroll
   metro: new Metronome(),
   wake: null,
   audioUrl: null,
@@ -92,7 +92,6 @@ export async function openSong(songId, opts = {}) {
   st.metro.setBpm(song.bpm || 100);
   if (song.beats) st.metro.beats = song.beats;
   setTool(null);
-  stopAutoScroll();
   closePanels();
   setupAudio();
   markOpened(songId);
@@ -105,7 +104,6 @@ export function closeViewer(fromPop = false) {
   st.open = false;
   clearTimeout(chromeTimer);
   st.metro.stop();
-  stopAutoScroll();
   const a = $("#v-audio-el");
   if (a) a.pause();
   if (st.audioUrl) URL.revokeObjectURL(st.audioUrl);
@@ -179,7 +177,7 @@ function buildDom() {
       btn("pen", "Krabbels", () => (st.tool ? setTool(null) : setTool("pen"))),
       btn("metronome", "Tempo", () => togglePanel("metro")),
       btn("audio", "Meespelen", () => togglePanel("audio"), "v-audio-btn"),
-      btn("scroll", "Scroll", () => toggleAutoScroll()),
+      btn("scroll", "Scroll", () => toggleScrollMode(), "v-scrollbtn"),
       btn("more", "Meer", () => togglePanel("more"))
     )
   );
@@ -348,7 +346,6 @@ function effectiveMode() {
   const { W, H } = stageSize();
   const landscape = W > H * 1.15;
   let m = S().viewMode;
-  if (st.autoScroll) return "scroll";
   // Automatisch + halve pagina: één pagina (halve pagina werkt niet bij twee naast elkaar).
   if (m === "auto") m = landscape && st.pages > 1 && !S().halfTurn ? "double" : "single";
   if (m === "double" && st.pages < 2) m = "single";
@@ -506,8 +503,10 @@ async function renderInner(keepCam) {
 
   if (mode === "scroll") {
     root().dataset.mode = mode;
+    updateScrollUi(mode);
     return renderScroll(token, W, H);
   }
+  updateScrollUi(mode);
 
   const gap = 6;
   const els = [];
@@ -558,7 +557,8 @@ function prerender(W, H, mode) {
 let scrollSlots = [];
 async function renderScroll(token, W, H) {
   const wrap = $("#v-pages");
-  const colW = Math.floor(Math.min(W, Math.max(H * 0.9, W * 0.7)));
+  // Schermbreed: pagina vult de hele breedte. Anders een prettige leeskolom.
+  const colW = S().scrollFill ? W : Math.floor(Math.min(W, Math.max(H * 0.9, W * 0.7)));
   const slots = [];
   for (let p = 1; p <= st.pages; p++) {
     const aspect = await getAspect(p);
@@ -2087,62 +2087,54 @@ export async function attachAudio(song, file) {
   await saveSong(song);
 }
 
-// ---------- auto-scroll ----------
+// ---------- scrollstand ----------
 
-let scrollRaf = 0;
-function toggleAutoScroll() {
-  st.autoScroll ? stopAutoScroll() : startAutoScroll();
+// Snelknop: gewone scrollstand aan/uit (terug naar de vorige weergave).
+function toggleScrollMode() {
+  if (S().viewMode === "scroll") {
+    setSetting("viewMode", st.prevMode && st.prevMode !== "scroll" ? st.prevMode : "auto");
+    toast("Pagina voor pagina", 1000);
+  } else {
+    st.prevMode = S().viewMode;
+    setSetting("viewMode", "scroll");
+    setSetting("halfTurn", false);
+    toast("Omlaag vegen om te scrollen", 1600);
+  }
+  st.half = false;
+  cam.z = 1;
+  render();
+  if ($("#v-panel") && !$("#v-panel").hidden) closePanels();
 }
 
-function startAutoScroll() {
-  const wasScroll = root().dataset.mode === "scroll";
-  st.autoScroll = true;
-  showChrome(false);
-  const pill = $("#v-scrollpill");
-  pill.hidden = false;
-  let paused = false;
-  const draw = () => {
-    fill(
-      pill,
-      h("button", { type: "button", class: "vbtn", "aria-label": paused ? "Verder" : "Pauze", onclick: () => { paused = !paused; draw(); }, html: icon(paused ? "play" : "pause") }),
-      h("button", { type: "button", class: "vbtn", "aria-label": "Langzamer", onclick: () => { setSetting("scrollSpeed", Math.max(5, S().scrollSpeed - 5)); draw(); } }, "−"),
-      h("span", {}, S().scrollSpeed),
-      h("button", { type: "button", class: "vbtn", "aria-label": "Sneller", onclick: () => { setSetting("scrollSpeed", Math.min(200, S().scrollSpeed + 5)); draw(); } }, "+"),
-      h("button", { type: "button", class: "vbtn", "aria-label": "Stoppen", onclick: stopAutoScroll, html: icon("close") })
-    );
-  };
-  draw();
-  const go = () => {
-    let last = performance.now();
-    const frame = (now) => {
-      if (!st.autoScroll) return;
-      const dt = (now - last) / 1000;
-      last = now;
-      if (!paused && !camAnim) {
-        const { H } = stageSize();
-        const minY = H - contentSize().h * cam.z;
-        cam.y = Math.max(minY, cam.y - S().scrollSpeed * dt);
-        applyCam();
-        if (cam.y <= minY + 1) {
-          paused = true;
-          draw();
-        }
-      }
-      scrollRaf = requestAnimationFrame(frame);
-    };
-    scrollRaf = requestAnimationFrame(frame);
-  };
-  if (wasScroll) go();
-  else render().then(go);
+function toggleScrollFill() {
+  setSetting("scrollFill", !S().scrollFill);
+  cam.z = 1;
+  cam.x = 0;
+  render();
+  toast(S().scrollFill ? "Schermbreed" : "Normale breedte", 1100);
 }
 
-function stopAutoScroll() {
-  if (!st.autoScroll) return;
-  st.autoScroll = false;
-  cancelAnimationFrame(scrollRaf);
+// Knopje onderin, alleen zichtbaar in de scrollstand: schermbreed aan/uit.
+function updateScrollUi(mode = effectiveMode()) {
+  const inScroll = mode === "scroll";
+  const sb = root().querySelector(".v-scrollbtn");
+  if (sb) sb.classList.toggle("on", inScroll);
   const pill = $("#v-scrollpill");
-  if (pill) pill.hidden = true;
-  if (S().viewMode !== "scroll" && st.open) render();
+  if (!pill) return;
+  pill.hidden = !inScroll;
+  if (!inScroll) return;
+  const on = !!S().scrollFill;
+  fill(
+    pill,
+    h("button", {
+      type: "button",
+      class: "scrollfill" + (on ? " on" : ""),
+      "aria-pressed": on ? "true" : "false",
+      "aria-label": "Schermbreed",
+      onclick: toggleScrollFill,
+      html: icon("fitw") + `<span>Schermbreed</span>`,
+    })
+  );
 }
 
 // ---------- paginanummer in beeld ----------
@@ -2239,6 +2231,7 @@ function renderMore(p) {
     { class: "more-grid" },
     tile("half", "Halve pagina", S().halfTurn, toggleHalf),
     skipP ? tile("undo", `Half terug (p. ${skipP})`, false, () => { closePanels(); restoreHalf(skipP); }) : null,
+    mode === "scroll" ? tile("fitw", "Schermbreed", !!S().scrollFill, () => { toggleScrollFill(); redraw(); }) : null,
     S().halfTurn ? tile("repeat", "Helften wisselen", false, () => { setSetting("halfOrder", S().halfOrder === "nextTop" ? "curTop" : "nextTop"); if (st.page < st.pages) st.half = true; render(); }) : null,
     tile("info", "Pagina­nummer", S().pageBadge, () => { setSetting("pageBadge", !S().pageBadge); updateBadge($("#v-count").textContent); if (S().pageBadge) toast("Sleep om te verplaatsen, tik voor groter", 2500); redraw(); }),
     tile("crop", "Randen weg", S().autoCrop, () => { setSetting("autoCrop", !S().autoCrop); st.cache.clear(); render(); redraw(); }),

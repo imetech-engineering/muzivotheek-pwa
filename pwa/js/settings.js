@@ -26,7 +26,7 @@ export const DEFAULTS = {
   pageBadgePos: { x: 0.93, y: 0.86 },
   penColor: "#e11d48",
   penWidth: 3,
-  scrollSpeed: 30, // pixels per seconde bij auto-scroll
+  scrollFill: false, // scrollstand: pagina vult de schermbreedte
   metroSound: true,
   metroFlash: true,
   metroAccent: true,
