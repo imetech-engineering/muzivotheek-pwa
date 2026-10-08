@@ -1,7 +1,7 @@
 // Muzivotheek: hoofdscherm met tabbladen Nummers, Lijsten, Tools, Instellingen.
 
 import { db, persistStorage, storageEstimate } from "./db.js";
-import { allSongs, getSong, saveSong, importPdf, deleteSong, sortSongs, matches, folders, mergeSongs, appendFiles } from "./library.js";
+import { allSongs, getSong, saveSong, importPdf, deleteSong, sortSongs, matches, mergeSongs, appendFiles } from "./library.js";
 import { allSetlists, getSetlist, saveSetlist, newSetlist, deleteSetlist, duplicateSetlist, addToSetlist } from "./setlists.js";
 import { settings, setSetting, resetSettings, applyTheme } from "./settings.js";
 import { openSong, attachAudio, viewerOpen } from "./viewer.js";
@@ -26,7 +26,7 @@ const S = () => settings();
 const state = {
   tab: "songs",
   q: "",
-  filter: "", // "" | "★" | "map:<naam>" | "part:<partij>"
+  filter: "", // "" | "★" | "part:<partij>"
   sel: null, // Set met geselecteerde nummers (selecteermodus), anders null
   openList: null, // id van geopende afspeellijst
   needPermission: [], // gekoppelde mappen die opnieuw toestemming nodig hebben
@@ -61,7 +61,6 @@ function renderTab() {
 const SORTS = [
   ["title", "Titel"],
   ["composer", "Componist"],
-  ["folder", "Map"],
   ["added", "Nieuwste eerst"],
   ["opened", "Laatst geopend"],
   ["played", "Meest gespeeld"],
@@ -90,7 +89,6 @@ async function thumbUrl(id) {
 async function renderSongs() {
   const tab = $("#tab-songs");
   const all = await allSongs();
-  const fl = await folders();
   if (state.filter && !filterLabel(state.filter, all)) state.filter = "";
   if (state.sel) for (const id of [...state.sel]) if (!all.some((x) => x.id === id)) state.sel.delete(id);
   if (state.sel && !state.sel.size) state.sel = null;
@@ -124,16 +122,16 @@ async function renderSongs() {
     })
   );
 
-  // Eén filterknop in plaats van een rij knoppen per map.
-  const hasFilters = fl.length || all.some((x) => x.favorite) || all.some((x) => x.part);
+  // Eén filterknop: op partij (en favorieten).
+  const hasFilters = all.some((x) => x.favorite) || all.some((x) => x.part);
   if (hasFilters) {
     const active = state.filter ? filterLabel(state.filter, all) : null;
     tools.insertBefore(
       h(
         "button",
-        { type: "button", class: "chip" + (active ? " on" : ""), onclick: () => pickFilter(all, fl) },
+        { type: "button", class: "chip" + (active ? " on" : ""), onclick: () => pickFilter(all) },
         h("span", { class: "chip-ic", html: icon("filter") }),
-        h("span", {}, active || "Filter"),
+        h("span", {}, active || "Partij"),
         active
           ? h("span", {
               class: "chip-x",
@@ -229,11 +227,10 @@ async function renderSongs() {
     let lastGroup = null;
     const frag = [];
     for (const s of items) {
-      // Kopjes per letter / map bij sorteren op titel of map.
+      // Kopjes per letter / componist.
       let group = null;
       if (!grid && !state.q) {
         if (S().sort === "title") group = (s.title[0] || "#").toUpperCase().replace(/[^A-Z]/, "#");
-        if (S().sort === "folder") group = s.folder || "Zonder map";
         if (S().sort === "composer") group = s.composer || "Onbekend";
       }
       if (group && group !== lastGroup) {
@@ -276,8 +273,7 @@ function songRow(s, grid) {
       "div",
       { class: "row-main" },
       h("div", { class: "row-title" }, s.favorite ? h("span", { class: "fav", html: icon("star") }) : null, s.title),
-      h("div", { class: "row-sub" }, sub),
-      s.folder && !grid ? h("div", { class: "row-tag" }, s.folder) : null
+      h("div", { class: "row-sub" }, sub)
     ),
     state.sel ? null : more
   );
@@ -332,8 +328,7 @@ function longPress(el, fn) {
 function filterLabel(f, all) {
   if (f === "★") return all.some((x) => x.favorite) ? "Favorieten" : null;
   if (f.startsWith("part:")) return all.some((x) => x.part === f.slice(5)) ? f.slice(5) : null;
-  const m = f.startsWith("map:") ? f.slice(4) : f;
-  return all.some((x) => x.folder === m) ? m : null;
+  return null;
 }
 
 function applyFilter(list) {
@@ -341,17 +336,15 @@ function applyFilter(list) {
   if (!f) return list;
   if (f === "★") return list.filter((x) => x.favorite);
   if (f.startsWith("part:")) return list.filter((x) => x.part === f.slice(5));
-  const m = f.startsWith("map:") ? f.slice(4) : f;
-  return list.filter((x) => x.folder === m);
+  return list;
 }
 
-async function pickFilter(all, fl) {
+async function pickFilter(all) {
   const coll = new Intl.Collator("nl", { numeric: true });
   const parts = [...new Set(all.map((x) => x.part).filter(Boolean))].sort(coll.compare);
-  const v = await menu("Filter", [
+  const v = await menu("Filter op partij", [
     { label: "Alles", value: "", icon: icon("music"), active: !state.filter },
     all.some((x) => x.favorite) ? { label: "Favorieten", value: "★", icon: icon("star"), active: state.filter === "★" } : null,
-    ...fl.map((f) => ({ label: f, value: "map:" + f, icon: icon("folder"), active: state.filter === "map:" + f || state.filter === f })),
     ...parts.map((p) => ({ label: p, value: "part:" + p, icon: icon("audio"), active: state.filter === "part:" + p })),
   ].filter(Boolean));
   if (v === undefined || v === null) return;
@@ -398,35 +391,10 @@ function renderSelActions() {
   fill(
     bar,
     act("list", "Lijst", () => addSongsToListDlg([...state.sel])),
-    act("folder", "Map", () => setFolderForSel()),
     act("star", "Favoriet", () => favSel()),
     act("copy", "Samen", () => mergeSel(), { disabled: n < 2 }),
     act("trash", "Weg", () => deleteSel(), { danger: true })
   );
-}
-
-async function setFolderForSel() {
-  const fl = await folders();
-  const v = await menu("Naar map", [
-    ...fl.map((f) => ({ label: f, value: "m:" + f, icon: icon("folder") })),
-    { label: "Nieuwe map…", value: "__new", icon: icon("plus") },
-    { label: "Geen map", value: "__none", icon: icon("close") },
-  ]);
-  if (!v) return;
-  let name = v === "__none" ? "" : v.slice(2);
-  if (v === "__new") {
-    name = await promptDlg("Naam van de map", "", { placeholder: "bijv. Concert, Marsen, Kerst" });
-    if (!name) return;
-  }
-  for (const id of state.sel) {
-    const x = await getSong(id);
-    if (x) {
-      x.folder = name;
-      await saveSong(x);
-    }
-  }
-  toast(name ? `Naar map "${name}"` : "Map weggehaald", 1800);
-  endSelect();
 }
 
 async function favSel() {
@@ -761,8 +729,6 @@ async function importFiles(files) {
   let items = files.map((f) => (f instanceof Blob ? { file: f, folder: null } : f));
   items = items.filter(({ file: f }) => isPdfFile(f) || isImageFile(f));
   if (!items.length) return toast("Kies een PDF of foto");
-  let defFolder = "";
-  if (items.length > 1 && state.filter.startsWith("map:")) defFolder = state.filter.slice(4);
   // Meerdere foto's: één nummer met meerdere pagina's, of elke foto apart?
   const photos = items.filter(({ file: f }) => isImageFile(f) && !isPdfFile(f));
   if (photos.length > 1) {
@@ -792,7 +758,7 @@ async function importFiles(files) {
     prog.querySelector("span").textContent = `Toevoegen ${i + 1} van ${files.length}…`;
     prog.querySelector("i").style.width = ((i + 0.5) / files.length) * 100 + "%";
     try {
-      const r = await importPdf(files[i].file, { folder: files[i].folder ?? defFolder, name: files[i].name, numbered });
+      const r = await importPdf(files[i].file, { folder: files[i].folder ?? "", name: files[i].name, numbered });
       r.duplicate ? dup++ : ok++;
     } catch (e) {
       console.error(e);

@@ -174,7 +174,7 @@ export function sortSongs(list, sort, desc) {
 
 export function matches(song, q) {
   if (!q) return true;
-  const hay = [song.title, song.composer, song.arranger, song.part, song.folder, song.genre, song.key, (song.tags || []).join(" ")]
+  const hay = [song.title, song.composer, song.arranger, song.part, song.genre, song.key, (song.tags || []).join(" ")]
     .join(" ")
     .toLowerCase();
   return q
