@@ -140,3 +140,82 @@ export function stripComposerFromTitle(title, composer) {
 export const cleanComposer = (s) => tidy(String(s || "").replace(COMP, "").replace(/[©(].*$/, ""));
 export const cleanArranger = (s) => tidy(String(s || "").replace(ARR, ""));
 export { ARR as ARRANGER_PREFIX, COMP as COMPOSER_PREFIX };
+
+// ---------- controle op herkende namen ----------
+// Herkenning (vooral OCR) levert soms rommel of hele zinnen. Alleen wat echt op een
+// persoonsnaam of titel lijkt wordt overgenomen; de rest blijft leeg.
+
+const NAME_STOP = new Set([
+  "for", "voor", "and", "en", "the", "of", "with", "met", "by", "door", "music", "muziek", "arrangement", "arranged", "arrangeur",
+  "band", "brass", "harmonie", "fanfare", "orchestra", "orkest", "ensemble", "concert", "score", "partituur", "solo", "part", "stem",
+  "tempo", "copyright", "rights", "reserved", "edition", "uitgave", "publisher", "publications", "publishing", "www", "http", "com",
+  "nederland", "holland", "page", "pagina", "bladzijde", "composed", "componist", "composer", "tekst", "text", "lyrics", "words",
+]);
+const PARTICLE = /^(van|de|der|den|von|la|le|du|di|da|ten|ter|'t|y|dos|das|del|della|el|al|het)$/i;
+const CAPWORD = /^[A-ZÀ-Ý][A-Za-zÀ-ÿ'’.\-]*$/;
+
+// Geeft een nette persoonsnaam terug, of "" als het geen naam lijkt.
+export function validPerson(raw) {
+  let t = tidy(String(raw || "").replace(/\(\s*\d{4}\s*[-–]\s*\d{4}\s*\)|\b\d{4}\s*[-–]\s*\d{4}\b/g, "")).replace(/[,;:]+$/, "");
+  if (!t || t.length > 60 || /\d|[@#<>\/\\|_=+*{}\[\]]/.test(t)) return "";
+  // "JAN VAN DER ROOST" -> "Jan Van Der Roost"
+  if (t === t.toUpperCase() && /[A-Z]{3}/.test(t)) t = t.toLowerCase().replace(/(^|[\s\-'’.])([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase());
+  const words = t.split(" ");
+  if (words.length > 8) return "";
+  // Langste reeks geldige naamwoorden (hoofdletterwoorden en tussenvoegsels); rommel eromheen valt weg.
+  let best = [];
+  let run = [];
+  const flush = () => {
+    while (run.length && PARTICLE.test(run[run.length - 1])) run.pop();
+    while (run.length && PARTICLE.test(run[0])) run.shift();
+    if (run.filter((w) => !PARTICLE.test(w)).length > best.filter((w) => !PARTICLE.test(w)).length) best = run;
+    run = [];
+  };
+  for (const w of words) {
+    const lw = w.toLowerCase().replace(/[.,]/g, "");
+    if (NAME_STOP.has(lw)) {
+      flush();
+      return ""; // "Music for brass band", "Arrangement …": geen naam
+    }
+    if (CAPWORD.test(w) && (w.replace(/[^A-Za-zÀ-ÿ]/g, "").length >= 2 || /^[A-Z]\.$/.test(w))) run.push(w);
+    else if (PARTICLE.test(w) && run.length) run.push(w);
+    else flush();
+  }
+  flush();
+  const names = best.filter((w) => !PARTICLE.test(w));
+  if (!names.length || names.length > 5) return "";
+  // Moet het grootste deel van de tekst zijn, anders was het vooral rommel.
+  if (best.length < Math.ceil(words.length * 0.6)) return "";
+  // Losse tweeletterwoorden ("Lo", "ES") zijn bijna altijd OCR-ruis in een naam.
+  if (names.some((w) => w.replace(/[^A-Za-zÀ-ÿ]/g, "").length === 2 && !/\./.test(w))) return "";
+  const out = best.join(" ");
+  if (out.length < 3 || out.length > 40) return "";
+  // Eén woord: alleen als het geloofwaardig is (geen losse initiaal).
+  if (!names.some((w) => w.replace(/[^A-Za-zÀ-ÿ]/g, "").length >= 3)) return "";
+  if (names.length === 1 && names[0].replace(/[^A-Za-zÀ-ÿ]/g, "").length < 4) return "";
+  // Letters zonder klinkers of dezelfde letter vaak achter elkaar = OCR-rommel.
+  if (names.some((w) => !/[aeiouyàâäéèêëïîôöùûüAEIOUY]/i.test(w) && w.replace(/[^A-Za-z]/g, "").length > 2)) return "";
+  if (/(.)\1{3,}/.test(out)) return "";
+  return out;
+}
+
+// Geeft een nette titel terug, of "" bij rommel / een zin.
+export function validTitle(raw) {
+  const t = tidy(String(raw || "")).replace(/[|_]+/g, " ").replace(/\s+/g, " ").trim();
+  if (t.length < 2 || t.length > 60) return "";
+  const words = t.split(" ");
+  if (words.length > 8) return "";
+  const letters = (t.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+  if (letters / t.length < 0.7) return "";
+  if (!words.some((w) => w.replace(/[^A-Za-zÀ-ÿ]/g, "").length >= 3)) return "";
+  if (/(.)\1{3,}/.test(t) || /[@#<>\\{}\[\]=*]|https?:|www\./i.test(t)) return "";
+  if (words.length > 3 && words.filter((w) => w.length === 1).length > 1) return "";
+  return t;
+}
+
+// Partijnaam: kort en netjes.
+export function validPart(raw) {
+  const t = tidy(String(raw || ""));
+  if (!t || t.length > 30 || t.split(" ").length > 5 || /[@#<>\\{}\[\]=*|]/.test(t)) return "";
+  return t;
+}

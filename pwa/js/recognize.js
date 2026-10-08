@@ -13,7 +13,7 @@ import { db } from "./db.js";
 import { loadPdf, renderPage } from "./pdf.js";
 import { getSong, saveSong } from "./library.js";
 import { settings } from "./settings.js";
-import { isPartText, isGarbageName, stripComposerFromTitle, cleanComposer, cleanArranger, ARRANGER_PREFIX, COMPOSER_PREFIX } from "./names.js";
+import { isPartText, isGarbageName, stripComposerFromTitle, cleanComposer, cleanArranger, validPerson, validTitle, validPart, ARRANGER_PREFIX, COMPOSER_PREFIX } from "./names.js";
 
 const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_TIMEOUT = 60000;
@@ -42,23 +42,39 @@ export function analyseLines(lines) {
   const out = {};
 
   // Componist/arrangeur: eerst op sleutelwoorden ("Music by", "arr.", "Muziek:").
+  // Wat erachter staat moet echt op een naam lijken, anders wordt het genegeerd.
+  const person = (t) => validPerson(t);
   for (const l of top) {
     const t = l.text.trim();
-    if (!out.arranger && ARRANGER_PREFIX.test(t) && t.length < 70) out.arranger = cleanArranger(t);
-    else if (!out.composer && COMPOSER_PREFIX.test(t) && t.length < 70) out.composer = cleanComposer(t);
-    else {
+    if (t.length > 70) continue;
+    if (!out.arranger && ARRANGER_PREFIX.test(t)) {
+      const n = person(cleanArranger(t));
+      if (n) out.arranger = n;
+    } else if (!out.composer && COMPOSER_PREFIX.test(t)) {
+      const n = person(cleanComposer(t));
+      if (n) out.composer = n;
+    } else {
       const m = t.match(/\b(?:arr\.?|arranged by|bew\.?)\s+(.{3,50})$/i);
-      if (m && !out.arranger) out.arranger = cleanArranger(m[1]);
+      const n = m && person(cleanArranger(m[1]));
+      if (n && !out.arranger) out.arranger = n;
     }
   }
 
-  // Titel: grootste letters bovenaan, geen partij/tempo/"Score".
+  // Titel: grootste letters bovenaan, geen partij/tempo/"Score". Eerste kandidaat die netjes oogt.
   const sizes = top.map((l) => l.size).sort((a, b) => b - a);
   const candidates = top
     .filter((l) => !NOT_TITLE.test(l.text.trim()) && !isPartText(l.text) && !TEMPO_MARK.test(l.text) && /[a-z]{2}/i.test(l.text) && !ARRANGER_PREFIX.test(l.text.trim()) && !COMPOSER_PREFIX.test(l.text.trim()))
     .sort((a, b) => b.size - a.size || a.y - b.y);
-  const titleLine = candidates[0];
-  if (titleLine && titleLine.size >= sizes[0] * 0.8) out.title = titleLine.text.trim().replace(/\s+/g, " ");
+  let titleLine = null;
+  for (const c of candidates) {
+    if (c.size < sizes[0] * 0.8) break;
+    const t = validTitle(c.text);
+    if (t) {
+      titleLine = c;
+      out.title = t;
+      break;
+    }
+  }
 
   // Geen sleutelwoord? Componist staat meestal rechts bovenaan, kleiner dan de titel.
   if (!out.composer) {
@@ -66,19 +82,22 @@ export function analyseLines(lines) {
       .filter((l) => l !== titleLine && l.x1 > 0.62 && l.x0 > 0.35 && looksLikeName(l.text.replace(/\(.*?\)/g, "")) && !isPartText(l.text) && !NOT_TITLE.test(l.text.trim()))
       .filter((l) => !titleLine || l.size < titleLine.size)
       .sort((a, b) => a.y - b.y);
-    if (right[0]) {
-      const t = right[0].text.trim();
-      if (!/\barr\b/i.test(t)) out.composer = cleanComposer(t.replace(/\(\s*\d{4}\s*[-–]\s*\d{4}\s*\)/, "").replace(/\b\d{4}\s*[-–]\s*\d{4}\b/, ""));
+    for (const l of right) {
+      const t = l.text.trim();
+      if (/\barr\b/i.test(t)) continue;
+      const n = person(cleanComposer(t));
+      if (n) {
+        out.composer = n;
+        break;
+      }
     }
   }
   // Partij: korte regel bovenaan met een instrument ("2nd Cornet Bb", "Solo Cornet").
   const partLine = top.find((l) => l !== titleLine && isPartText(l.text) && l.text.trim().length <= 30 && !TEMPO_MARK.test(l.text));
-  if (partLine) out.part = partLine.text.trim();
+  const part = partLine && validPart(partLine.text);
+  if (part) out.part = part;
 
-  for (const k of Object.keys(out)) {
-    out[k] = (out[k] || "").replace(/\s+/g, " ").trim();
-    if (!out[k] || out[k].length > 80) delete out[k];
-  }
+  for (const k of Object.keys(out)) if (!out[k]) delete out[k];
   return out;
 }
 
@@ -167,7 +186,7 @@ export async function fromOcr(doc) {
     const W = c.width;
     const H = cropH / 0.4; // naar hele pagina terugrekenen
     const lines = (data.lines || [])
-      .filter((l) => l.confidence > 45 && l.text.trim().length > 1)
+      .filter((l) => l.confidence > 60 && l.text.trim().length > 1)
       .map((l) => ({ text: l.text.replace(/\s+/g, " ").trim(), x0: l.bbox.x0 / W, x1: l.bbox.x1 / W, y: l.bbox.y0 / H, size: l.bbox.y1 - l.bbox.y0 }));
     return { lines, info: analyseLines(lines) };
   } finally {
@@ -183,12 +202,12 @@ export function mergeInfo(song, info) {
   const auto = song.auto || {};
   const changed = [];
   const canSet = (k) => !song[k] || auto[k];
-  if (info.composer && canSet("composer")) {
+  if (info.composer && validPerson(info.composer) && canSet("composer")) {
     if (song.composer !== info.composer) changed.push("componist");
     song.composer = info.composer;
     auto.composer = true;
   }
-  if (info.arranger && canSet("arranger")) {
+  if (info.arranger && validPerson(info.arranger) && canSet("arranger")) {
     if (song.arranger !== info.arranger) changed.push("arrangeur");
     song.arranger = info.arranger;
     auto.arranger = true;
@@ -240,19 +259,21 @@ async function runQueue() {
   running = false;
 }
 
-// Geeft de lijst gewijzigde velden terug (voor een melding), of [].
-export async function recognizeSong(id, { allowOcr = true } = {}) {
+// Haalt titel/componist/arrangeur/partij uit het blad, zonder iets op te slaan.
+export async function recognizeInfo(id, { allowOcr = true } = {}) {
   const song = await getSong(id);
-  if (!song) return [];
+  if (!song) return {};
   const blob = await db.get("files", id);
-  if (!blob) return [];
+  if (!blob) return {};
   const doc = await loadPdf(blob);
   let info = {};
   try {
     const t = await fromPdfText(doc).catch(() => ({ hasText: false, info: {} }));
     info = t.info || {};
+    // Tekst in de PDF gevonden en bruikbaar? Dan is OCR niet nodig. Scan of rommelige tekstlaag: wel.
+    const textWorks = t.hasText && (info.title || info.composer);
     const needMore = !info.composer || (song.auto && song.auto.titleGarbage && !info.title);
-    if (allowOcr && needMore && !t.hasText && navigatorOnlineOrCached()) {
+    if (allowOcr && needMore && !textWorks && navigatorOnlineOrCached()) {
       const o = await fromOcr(doc).catch((e) => {
         console.warn("OCR mislukt", e);
         return { info: {} };
@@ -262,6 +283,12 @@ export async function recognizeSong(id, { allowOcr = true } = {}) {
   } finally {
     doc.destroy();
   }
+  return info;
+}
+
+// Geeft de lijst gewijzigde velden terug (voor een melding), of [].
+export async function recognizeSong(id, { allowOcr = true } = {}) {
+  const info = await recognizeInfo(id, { allowOcr });
   const fresh = await getSong(id); // kan intussen bewerkt zijn
   if (!fresh) return [];
   const changed = mergeInfo(fresh, info);
@@ -269,6 +296,24 @@ export async function recognizeSong(id, { allowOcr = true } = {}) {
   await saveSong(fresh);
   if (changed.length) document.dispatchEvent(new CustomEvent("recognized", { detail: { id, title: fresh.title, composer: fresh.composer, changed } }));
   return changed;
+}
+
+// Eenmalig: eerder automatisch ingevulde rommel (te lang, geen naam) weer leegmaken.
+export async function cleanBadRecognition() {
+  const { allSongs } = await import("./library.js");
+  let n = 0;
+  for (const s of await allSongs()) {
+    const a = s.auto || {};
+    let ch = false;
+    if (a.composer && s.composer && !validPerson(s.composer)) (s.composer = ""), (ch = true);
+    if (a.arranger && s.arranger && !validPerson(s.arranger)) (s.arranger = ""), (ch = true);
+    if (a.title && !a.titleGarbage && s.title && s.title.length > 60 && !validTitle(s.title)) ch = false; // titel nooit zomaar weghalen
+    if (ch) {
+      await saveSong(s);
+      n++;
+    }
+  }
+  return n;
 }
 
 // OCR kan offline als de onderdelen al eens gedownload zijn.

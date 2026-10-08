@@ -13,7 +13,8 @@ import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, f
 import { icon } from "./icons.js";
 import { parseYouTube, pickYouTube } from "./youtube.js";
 import { isImageFile, isPdfFile } from "./imgpdf.js";
-import { recognizeSong, queueRecognize } from "./recognize.js";
+import { recognizeSong, recognizeInfo, queueRecognize, cleanBadRecognition } from "./recognize.js";
+import { isGarbageName } from "./names.js";
 import { canLinkFolder, canPickFolderOnce, linkFolder, unlinkFolder, folderSources, syncFolder, syncAllFolders, regrantAndSync, pickFolderOnce } from "./folders.js";
 import { openSharePoint, openSharePointWithLink, fixBrokenLinks, resumeAfterRedirect, spSettings } from "./sp_ui.js";
 import { spConfigured, syncAllSharePoint } from "./sharepoint.js";
@@ -572,7 +573,6 @@ const KEYS = ["", "C", "G", "D", "A", "E", "B", "F♯", "F", "B♭", "E♭", "A�
 export async function editSong(id, onSaved) {
   const s = await getSong(id);
   if (!s) return;
-  const fl = await folders();
   const f = (label, input) => h("label", { class: "form-row" }, h("span", {}, label), input);
   const title = h("input", { class: "field", value: s.title });
   const composer = h("input", { class: "field", value: s.composer || "", placeholder: "bijv. Jacob de Haan" });
@@ -585,17 +585,32 @@ export async function editSong(id, onSaved) {
       recogBtn.disabled = true;
       recogBtn.textContent = "Bezig…";
       try {
-        // Tijdelijk: velden die nu leeg zijn mag de herkenning invullen.
-        const cur = await getSong(id);
-        cur.auto = { ...(cur.auto || {}), composer: !composer.value.trim(), arranger: !arranger.value.trim() };
-        await saveSong(cur);
-        await recognizeSong(id);
-        const r = await getSong(id);
-        if (!composer.value.trim() && r.composer) composer.value = r.composer;
-        if (!arranger.value.trim() && r.arranger) arranger.value = r.arranger;
-        if (!part.value.trim() && r.part) part.value = r.part;
-        if (r.auto && r.auto.title && r.title !== title.value && (!title.value.trim() || s.auto?.titleGarbage)) title.value = r.title;
-        toast(r.composer || r.arranger ? "Herkend" : "Niets gevonden in het blad", 2000);
+        // Alleen invullen in dit formulier; opgeslagen wordt pas met "Opslaan".
+        const info = await recognizeInfo(id);
+        const cur = (await getSong(id)) || s;
+        const a = cur.auto || {};
+        const filled = [];
+        // Leeg, of eerder automatisch ingevuld (en dus niet door jou getypt): mag vervangen worden.
+        const put = (input, val, label, auto) => {
+          if (!val) return;
+          const v = input.value.trim();
+          if (v === val) return;
+          if (!v || (auto && v === (label === "componist" ? cur.composer : cur.arranger))) {
+            input.value = val;
+            filled.push(label);
+          }
+        };
+        put(composer, info.composer, "componist", a.composer);
+        put(arranger, info.arranger, "arrangeur", a.arranger);
+        if (info.part && !part.value.trim()) {
+          part.value = info.part;
+          filled.push("partij");
+        }
+        if (info.title && (!title.value.trim() || isGarbageName(title.value))) {
+          title.value = info.title;
+          filled.push("titel");
+        }
+        toast(filled.length ? `Ingevuld: ${filled.join(", ")}. Even controleren.` : "Niets betrouwbaars gevonden. Vul het zelf in.", 3200);
       } catch (e) {
         toast("Herkennen lukte niet", 2500);
       }
@@ -603,8 +618,6 @@ export async function editSong(id, onSaved) {
       recogBtn.textContent = "Herken uit blad";
     },
   }, "Herken uit blad");
-  const folder = h("input", { class: "field", value: s.folder || "", list: "dl-folders", placeholder: "bijv. Concert, Marsen, Kerst" });
-  const dl = h("datalist", { id: "dl-folders" }, fl.map((x) => h("option", { value: x })));
   const key = h("select", { class: "field" }, KEYS.map((k) => h("option", { value: k, selected: (s.key || "") === k }, k || "—")));
   const bpm = h("input", { class: "field", type: "number", inputmode: "numeric", min: 0, max: 300, value: s.bpm || "", placeholder: "—" });
   const notes = h("textarea", { class: "field", rows: 2, placeholder: "bijv. 2e keer tacet" }, s.notes || "");
@@ -645,8 +658,6 @@ export async function editSong(id, onSaved) {
     f("Arrangeur", arranger),
     f("Partij", part),
     h("div", { class: "recog-row" }, recogBtn),
-    f("Map", folder),
-    dl,
     h("div", { class: "form-2" }, f("Toonsoort", key), f("Tempo (bpm)", bpm)),
     f("Notitie", notes),
     audioRow,
@@ -676,7 +687,6 @@ export async function editSong(id, onSaved) {
   s.composer = composer.value.trim();
   s.arranger = arranger.value.trim();
   s.part = part.value.trim();
-  s.folder = folder.value.trim();
   s.key = key.value;
   s.bpm = Math.max(0, Math.min(300, parseInt(bpm.value, 10) || 0));
   s.notes = notes.value.trim();
@@ -1549,8 +1559,15 @@ function init() {
     history.replaceState(null, "", location.pathname);
     setTimeout(() => openSharePointWithLink(sharedLink), 300);
   }
-  allSongs().then((s) => {
+  allSongs().then(async (s) => {
     if (s.length) persistStorage();
+    // Eenmalig: eerder foutief herkende (lange/rare) namen weer leegmaken.
+    try {
+      if (!localStorage.getItem("muzivotheek.cleanRecog1")) {
+        localStorage.setItem("muzivotheek.cleanRecog1", "1");
+        if ((await cleanBadRecognition()) > 0) document.dispatchEvent(new CustomEvent("library"));
+      }
+    } catch (e) {}
     // Foto's/scans zonder herkende titel (bv. eerder zonder internet): nog eens proberen.
     if (navigator.onLine) s.filter((x) => x.auto && x.auto.titleGarbage).slice(0, 20).forEach((x) => queueRecognize(x.id));
   });
