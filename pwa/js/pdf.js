@@ -11,7 +11,9 @@ export async function loadPdf(blob) {
 }
 
 // Teken een pagina op een nieuw canvas met de gegeven breedte in pixels.
-export async function renderPage(doc, pageNo, pixelWidth) {
+// keep = de uitgepakte plaatjes nog even bewaren, omdat dezelfde pagina zo meteen
+// opnieuw getekend wordt (scans uitpakken is het trage deel).
+export async function renderPage(doc, pageNo, pixelWidth, keep = false) {
   const page = await doc.getPage(pageNo);
   const base = page.getViewport({ scale: 1 });
   const scale = Math.max(0.1, pixelWidth / base.width);
@@ -23,7 +25,7 @@ export async function renderPage(doc, pageNo, pixelWidth) {
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  page.cleanup();
+  if (!keep) page.cleanup();
   return canvas;
 }
 

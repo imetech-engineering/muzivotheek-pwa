@@ -5,7 +5,7 @@
 
 import { db } from "./db.js";
 import { loadPdf, renderPage, pageAspect, findContentBox } from "./pdf.js";
-import { getSong, saveSong, markOpened, rotatePages } from "./library.js";
+import { getSong, saveSong, saveSongQuiet, markOpened, rotatePages } from "./library.js";
 import { getSetlist } from "./setlists.js";
 import { settings, setSetting } from "./settings.js";
 import { loadInk, saveInk, drawInk, hitTest, strokeBounds, isHairpin, hairpinLength, hairpinEnd, setHairpinLength, STAMP_GROUPS, STAMP_SIZES, COLORS, YELLOW, loadMusicFont } from "./ink.js";
@@ -74,6 +74,7 @@ export async function openSong(songId, opts = {}) {
     st.list = null;
   }
 
+  flushGeo();
   if (st.doc) st.doc.destroy();
   st.song = song;
   st.doc = await loadPdf(blob);
@@ -85,7 +86,8 @@ export async function openSong(songId, opts = {}) {
   st.selected = null;
   st.boxes.clear();
   st.aspects.clear();
-  st.cache.clear();
+  clearCache();
+  loadGeo();
   st.ink.clear();
   st.undo = [];
   st.returnPage = 0;
@@ -111,9 +113,10 @@ export function closeViewer(fromPop = false) {
   clearInterval(audioTimer);
   if (st.yt) st.yt.destroy();
   st.yt = null;
+  flushGeo();
   if (st.doc) st.doc.destroy();
   st.doc = null;
-  st.cache.clear();
+  clearCache();
   root().hidden = true;
   root().innerHTML = "";
   document.body.classList.remove("viewing");
@@ -232,6 +235,7 @@ let camTarget = null;
 
 function stageSize() {
   const s = $("#v-stage");
+  if (!s) return { W: 0, H: 0 }; // lezer al gesloten
   return { W: s.clientWidth, H: s.clientHeight };
 }
 
@@ -258,7 +262,10 @@ function applyCam() {
     const el = $("#v-cam");
     if (el) el.style.transform = `translate3d(${cam.x}px, ${cam.y}px, 0) scale(${cam.z})`;
     root().classList.toggle("zoomed", cam.z > 1.01);
-    if (root().dataset.mode === "scroll") trackScrollPage();
+    if (root().dataset.mode === "scroll") {
+      trackScrollPage();
+      if (cam.z > 1.05) sharpenSoon(); // ingezoomd: nieuw in beeld gekomen pagina's scherp maken
+    }
   });
 }
 
@@ -321,10 +328,14 @@ function sharpenSoon() {
 }
 
 async function sharpen() {
-  if (!st.open) return;
+  if (!st.open || !$("#v-stage")) return;
   const token = st.token;
+  const view = $("#v-stage").getBoundingClientRect();
   for (const el of document.querySelectorAll("#v-pages .v-page")) {
     if (token !== st.token) return;
+    // Alleen wat in beeld is; de rest volgt bij het scrollen.
+    const r = el.getBoundingClientRect();
+    if (r.bottom < view.top || r.top > view.bottom || r.right < view.left || r.left > view.right) continue;
     const want = targetRes(el._w, el._box, el._aspect);
     if (Math.abs(want - el._res) / el._res < 0.15) continue;
     const sheet = await getSheet(el._p, el._box, el._aspect, want);
@@ -334,8 +345,7 @@ async function sharpen() {
     c.height = sheet.height;
     c.getContext("2d").drawImage(sheet, 0, 0);
     el._res = want;
-    el._ink.width = sheet.width;
-    el._ink.height = sheet.height;
+    el._ink.width = el._ink.height = 0; // drawPageInk maakt hem weer op maat
     drawPageInk(el);
   }
 }
@@ -353,17 +363,53 @@ function effectiveMode() {
 }
 
 async function getAspect(p) {
-  if (!st.aspects.has(p)) st.aspects.set(p, await pageAspect(st.doc, p));
+  if (!st.aspects.has(p)) {
+    st.aspects.set(p, await pageAspect(st.doc, p));
+    saveGeoSoon();
+  }
   return st.aspects.get(p);
 }
 
 async function getBox(p) {
   if (!S().autoCrop) return { x: 0, y: 0, w: 1, h: 1 };
   if (!st.boxes.has(p)) {
-    const c = await renderPage(st.doc, p, 500);
+    // keep: de pagina wordt meteen daarna echt getekend, dan hoeft de scan niet
+    // nog eens uitgepakt te worden.
+    const c = await renderPage(st.doc, p, 500, true);
     st.boxes.set(p, findContentBox(c));
+    c.width = c.height = 0;
+    saveGeoSoon();
   }
   return st.boxes.get(p);
+}
+
+// Paginamaten en witte randen onthouden bij het nummer: de volgende keer
+// openen hoeft dan niet eerst elke pagina te meten. replaceFile wist ze.
+function loadGeo() {
+  const g = st.song.geo;
+  if (!g || g.n !== st.pages) return;
+  for (const [p, a] of Object.entries(g.a || {})) st.aspects.set(+p, a);
+  for (const [p, b] of Object.entries(g.b || {})) st.boxes.set(+p, { x: b[0], y: b[1], w: b[2], h: b[3] });
+}
+
+let geoTimer = 0;
+function saveGeoSoon() {
+  if (!geoTimer) geoTimer = setTimeout(flushGeo, 2000);
+}
+
+function flushGeo() {
+  if (!geoTimer) return;
+  clearTimeout(geoTimer);
+  geoTimer = 0;
+  const song = st.song;
+  if (!song || !st.doc) return;
+  const r = (v) => +v.toFixed(5);
+  song.geo = {
+    n: st.pages,
+    a: Object.fromEntries([...st.aspects].map(([p, a]) => [p, r(a)])),
+    b: Object.fromEntries([...st.boxes].map(([p, b]) => [p, [b.x, b.y, b.w, b.h].map(r)])),
+  };
+  saveSongQuiet(song).catch(() => {});
 }
 
 async function getInk(p) {
@@ -400,13 +446,28 @@ async function getSheet(p, box, aspect, pixelW) {
   sctx.drawImage(full, box.x * full.width, box.y * full.height, box.w * full.width, box.h * full.height, 0, 0, sheet.width, sheet.height);
   full.width = full.height = 0;
   st.cache.set(key, sheet);
-  if (st.cache.size > 8) {
+  trimCache();
+  return sheet;
+}
+
+// Cache begrenzen op pixels i.p.v. aantal: grote scans vullen anders het geheugen
+// van een tablet. De nieuwste paar blijven altijd.
+const CACHE_PIXELS = 32e6;
+function trimCache() {
+  let px = 0;
+  for (const c of st.cache.values()) px += c.width * c.height;
+  while (st.cache.size > 3 && px > CACHE_PIXELS) {
     const old = st.cache.keys().next().value;
     const c = st.cache.get(old);
+    px -= c.width * c.height;
     c.width = c.height = 0;
     st.cache.delete(old);
   }
-  return sheet;
+}
+
+function clearCache() {
+  for (const c of st.cache.values()) c.width = c.height = 0;
+  st.cache.clear();
 }
 
 // Element voor één pagina, passend in slotW x slotH (css-pixels, zoom 1).
@@ -425,9 +486,8 @@ async function pageEl(p, slotW, slotH, fitWidthOnly = false) {
   shown.getContext("2d").drawImage(sheet, 0, 0);
   shown.className = "v-sheet";
 
-  const ink = h("canvas", { class: "v-ink" });
-  ink.width = sheet.width;
-  ink.height = sheet.height;
+  // Krabbellaag krijgt pas pixels als er iets op staat (scheelt de helft geheugen).
+  const ink = h("canvas", { class: "v-ink", width: 0, height: 0 });
 
   const el = h("div", { class: "v-page", dataset: { page: p } }, shown, ink);
   el.style.width = w + "px";
@@ -441,6 +501,15 @@ async function pageEl(p, slotW, slotH, fitWidthOnly = false) {
 
 function drawPageInk(el) {
   const items = S().showNotes ? st.ink.get(el._p) || [] : [];
+  const ink = el._ink;
+  if (!items.length) {
+    if (ink.width) ink.width = ink.height = 0;
+    return;
+  }
+  if (ink.width !== el._sheet.width || ink.height !== el._sheet.height) {
+    ink.width = el._sheet.width;
+    ink.height = el._sheet.height;
+  }
   drawInk(el._ink.getContext("2d"), items, el._box, el._ink.width, el._ink.height, st.selected && st.selected.page === el._p ? st.selected.item : null);
 }
 
@@ -496,6 +565,8 @@ async function render(keepCam = false) {
 
 async function renderInner(keepCam) {
   const token = ++st.token;
+  scrollObs.forEach((o) => o.disconnect());
+  scrollObs = [];
   const wrap = $("#v-pages");
   const { W, H } = stageSize();
   const mode = effectiveMode();
@@ -555,6 +626,7 @@ function prerender(W, H, mode) {
 }
 
 let scrollSlots = [];
+let scrollObs = [];
 async function renderScroll(token, W, H) {
   const wrap = $("#v-pages");
   // Schermbreed: pagina vult de hele breedte. Anders een prettige leeskolom.
@@ -579,31 +651,88 @@ async function renderScroll(token, W, H) {
   clampCam();
   applyCam();
 
-  const io = new IntersectionObserver(
+  // Pagina's in en rond beeld tekenen: één tegelijk, de dichtstbijzijnde eerst,
+  // zodat de pagina die je ziet niet hoeft te wachten op pagina's ernaast.
+  const q = { token, want: new Set(), busy: false };
+  const near = new IntersectionObserver(
     (entries) => {
       for (const en of entries) {
-        if (!en.isIntersecting || en.target._done) continue;
-        en.target._done = true;
-        const p = +en.target.dataset.page;
-        pageEl(p, colW, H, true).then((el) => {
-          if (token !== st.token) return;
-          const before = en.target.offsetHeight;
-          const aboveView = (en.target.offsetTop + before) * cam.z + cam.y < 0;
-          fill(en.target, el);
-          en.target.style.height = el.style.height;
-          // Pagina boven het beeld werd hoger of lager: beeld vasthouden.
-          if (aboveView) {
-            cam.y -= (el._h - before) * cam.z;
-            clampCam();
-            applyCam();
-          }
-        });
+        if (en.isIntersecting) {
+          if (!en.target._done) q.want.add(en.target);
+        } else q.want.delete(en.target);
+      }
+      pumpScroll(q, colW, H);
+    },
+    { root: $("#v-stage"), rootMargin: "100% 0px" }
+  );
+  // Ver buiten beeld: pagina weer loslaten (een gescande pagina kost tientallen MB).
+  const far = new IntersectionObserver(
+    (entries) => {
+      for (const en of entries) {
+        const slot = en.target;
+        if (en.isIntersecting || !slot._done || token !== st.token) continue;
+        const el = slot.firstChild;
+        if (el && el._sheet) {
+          el._sheet.width = el._sheet.height = 0;
+          el._ink.width = el._ink.height = 0;
+        }
+        slot.textContent = "";
+        slot._done = false;
       }
     },
-    { root: $("#v-stage"), rootMargin: "150% 0px" }
+    { root: $("#v-stage"), rootMargin: "300% 0px" }
   );
-  slots.forEach((s) => io.observe(s));
+  scrollObs = [near, far];
+  slots.forEach((s) => {
+    near.observe(s);
+    far.observe(s);
+  });
   updateChrome();
+}
+
+async function pumpScroll(q, colW, H) {
+  if (q.busy) return;
+  q.busy = true;
+  try {
+    while (q.token === st.token && q.want.size) {
+      const mid = (-cam.y + H / 2) / cam.z;
+      let slot = null;
+      let best = Infinity;
+      for (const s of q.want) {
+        const d = Math.abs(s.offsetTop + s.offsetHeight / 2 - mid);
+        if (d < best) {
+          best = d;
+          slot = s;
+        }
+      }
+      q.want.delete(slot);
+      slot._done = true;
+      const el = await pageEl(+slot.dataset.page, colW, H, true).catch((e) => {
+        console.error(e);
+        return null;
+      });
+      if (q.token !== st.token) return;
+      if (!el) continue;
+      // Intussen ver weggescrold: niet bewaren.
+      if (Math.abs(slot.offsetTop + slot.offsetHeight / 2 - (-cam.y + H / 2) / cam.z) > (4 * H) / cam.z) {
+        el._sheet.width = el._sheet.height = 0;
+        slot._done = false;
+        continue;
+      }
+      const before = slot.offsetHeight;
+      const aboveView = (slot.offsetTop + before) * cam.z + cam.y < 0;
+      fill(slot, el);
+      slot.style.height = el.style.height;
+      // Pagina boven het beeld werd hoger of lager: beeld vasthouden.
+      if (aboveView && el._h !== before) {
+        cam.y -= (el._h - before) * cam.z;
+        clampCam();
+        applyCam();
+      }
+    }
+  } finally {
+    q.busy = false;
+  }
 }
 
 function trackScrollPage() {
@@ -1606,7 +1735,7 @@ function showLoupe(d, fingerX, fingerY) {
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, W, W);
   ctx.drawImage(sheet, sx, sy, sw, sh, 0, 0, W, W);
-  ctx.drawImage(el._ink, sx, sy, sw, sh, 0, 0, W, W);
+  if (el._ink.width) ctx.drawImage(el._ink, sx, sy, sw, sh, 0, 0, W, W);
   // Kruisje in het midden.
   ctx.strokeStyle = "#c41f6e";
   ctx.lineWidth = 2 * dpr;
@@ -2145,7 +2274,7 @@ async function rotateView(turns) {
       st.aspects.delete(p);
       st.ink.delete(p);
     }
-    st.cache.clear();
+    clearCache();
     st.undo = [];
     selectStamp(null);
     cam.x = cam.y = 0;
@@ -2306,7 +2435,7 @@ function renderMore(p) {
     mode === "scroll" ? tile("fitw", "Schermbreed", !!S().scrollFill, () => { toggleScrollFill(); redraw(); }) : null,
     S().halfTurn ? tile("repeat", "Helften wisselen", false, () => { setSetting("halfOrder", S().halfOrder === "nextTop" ? "curTop" : "nextTop"); if (st.page < st.pages) st.half = true; render(); }) : null,
     tile("info", "Pagina­nummer", S().pageBadge, () => { setSetting("pageBadge", !S().pageBadge); updateBadge($("#v-count").textContent); if (S().pageBadge) toast("Sleep om te verplaatsen, tik voor groter", 2500); redraw(); }),
-    tile("crop", "Randen weg", S().autoCrop, () => { setSetting("autoCrop", !S().autoCrop); st.cache.clear(); render(); redraw(); }),
+    tile("crop", "Randen weg", S().autoCrop, () => { setSetting("autoCrop", !S().autoCrop); clearCache(); render(); redraw(); }),
     tile("moon", "Nacht", S().nightSheet, () => { setSetting("nightSheet", !S().nightSheet); render(); redraw(); }),
     tile("pen", "Krabbels", S().showNotes, () => { setSetting("showNotes", !S().showNotes); document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk); redraw(); })
   );

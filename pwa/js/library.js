@@ -37,6 +37,14 @@ export async function getSong(id) {
   return songs.get(id) || null;
 }
 
+// Opslaan zonder 'gewijzigd'-tijd en zonder de lijst te verversen
+// (bijv. onthouden paginamaten).
+export async function saveSongQuiet(song) {
+  await allSongs();
+  songs.set(song.id, song);
+  await db.put("songs", song.id, song);
+}
+
 export async function saveSong(song) {
   await allSongs();
   song.updated = Date.now();
@@ -125,6 +133,7 @@ export async function replaceFile(song, file, srcVersion) {
   song.pages = doc.numPages;
   doc.destroy();
   song.fileSize = blob.size;
+  delete song.geo; // paginamaten horen bij het oude bestand
   song.srcVersion = srcVersion || null;
   await db.put("files", song.id, blob);
   if (thumb) await db.put("thumbs", song.id, thumb);
