@@ -2148,7 +2148,7 @@ function toggleScrollFill() {
   toast(S().scrollFill ? "Schermbreed" : "Normale breedte", 1100);
 }
 
-// Knopje onderin, alleen zichtbaar in de scrollstand: schermbreed aan/uit.
+// Rond knopje onderin (alleen icoon), alleen zichtbaar in de scrollstand: schermbreed aan/uit.
 function updateScrollUi(mode = effectiveMode()) {
   const inScroll = mode === "scroll";
   const sb = root().querySelector(".v-scrollbtn");
@@ -2165,8 +2165,9 @@ function updateScrollUi(mode = effectiveMode()) {
       class: "scrollfill" + (on ? " on" : ""),
       "aria-pressed": on ? "true" : "false",
       "aria-label": "Schermbreed",
+      title: "Schermbreed",
       onclick: toggleScrollFill,
-      html: icon("fitw") + `<span>Schermbreed</span>`,
+      html: icon("fitw"),
     })
   );
 }
