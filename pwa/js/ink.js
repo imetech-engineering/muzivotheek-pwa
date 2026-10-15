@@ -2,7 +2,8 @@
 // (0..1), zodat ze kloppen bij elke zoom, schermgrootte en marge-instelling.
 //
 // Item: { t: "pen" | "marker", c: kleur, w: dikte (fractie paginabreedte), p: [x,y,x,y,...] }
-//       { t: "text", c: kleur, s: grootte (fractie paginabreedte), x, y, v: tekst }
+//       { t: "text", c: kleur, s: grootte (fractie paginabreedte), x, y, v: tekst,
+//         k: uitrekfactor in de breedte (alleen crescendo/decrescendo, standaard 1) }
 
 import { db } from "./db.js";
 
@@ -31,18 +32,32 @@ export function drawInk(ctx, items, box, w, h, selected = null) {
       ctx.font = fontFor(it, Math.max(6, it.s * sx));
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(it.v, X(it.x), Y(it.y));
+      const k = it.k || 1;
+      if (isHairpin(it)) drawHairpin(ctx, it, X, Y, sx);
+      else ctx.fillText(it.v, X(it.x), Y(it.y));
       if (it === selected) {
         // Geselecteerd teken: stippelkader eromheen.
         const m = ctx.measureText(it.v);
         const px = Math.max(6, it.s * sx);
-        const bw = m.width + px * 0.5;
+        const bw = m.width * k + px * 0.5;
         const bh = px * 1.3;
         ctx.save();
         ctx.setLineDash([6, 4]);
         ctx.lineWidth = Math.max(1.5, px / 20);
         ctx.strokeStyle = "#c41f6e";
         ctx.strokeRect(X(it.x) - bw / 2, Y(it.y) - bh / 2, bw, bh);
+        if (isHairpin(it)) {
+          // Bolletje aan het eind: slepen = langer/korter maken.
+          const e = hairpinEnd(it);
+          ctx.setLineDash([]);
+          ctx.fillStyle = "#c41f6e";
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(X(e.x), Y(e.y), Math.max(7, px * 0.22), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
         ctx.restore();
       }
       continue;
@@ -104,6 +119,16 @@ export function hitTest(items, x, y, r, aspect) {
   let bestD = r;
   const d = (ax, ay) => Math.hypot(ax - x, (ay - y) * aspect);
   items.forEach((it, i) => {
+    if (isHairpin(it)) {
+      // Lang en plat: afstand tot de middellijn van het teken.
+      const hw = hairpinLength(it) / 2;
+      const dd = Math.hypot(Math.max(0, Math.abs(x - it.x) - hw), (y - it.y) * aspect) - it.s * 0.3;
+      if (dd < bestD) {
+        bestD = dd;
+        best = i;
+      }
+      return;
+    }
     if (it.t === "text") {
       const dd = d(it.x, it.y) - it.s * 0.6;
       if (dd < bestD) {
@@ -121,6 +146,43 @@ export function hitTest(items, x, y, r, aspect) {
     }
   });
   return best;
+}
+
+// Crescendo/decrescendo (vork): mag in de breedte uitgerekt worden.
+const HAIRPINS = ["\u{1D192}", "\u{1D193}"];
+const HAIRPIN_W = 1.072; // breedte van het teken in Noto Music, in em
+export const isHairpin = (it) => !!it && it.t === "text" && it.f === "m" && HAIRPINS.includes(it.v);
+// Lengte in fracties van de paginabreedte.
+export const hairpinLength = (it) => HAIRPIN_W * it.s * (it.k || 1);
+export const hairpinEnd = (it) => ({ x: it.x + hairpinLength(it) / 2, y: it.y });
+// Als twee lijnen getekend (niet als letterteken): bij uitrekken blijven ze scherp
+// en blijft de opening even hoog, hoe lang de vork ook wordt.
+function drawHairpin(ctx, it, X, Y, sx) {
+  const px = Math.max(6, it.s * sx);
+  const half = (hairpinLength(it) * sx) / 2 - px * 0.05;
+  const open = px * 0.21; // halve opening
+  const cx = X(it.x);
+  const cy = Y(it.y);
+  const tip = it.v === HAIRPINS[0] ? -1 : 1; // crescendo: punt links
+  ctx.save();
+  ctx.strokeStyle = it.c;
+  ctx.lineWidth = Math.max(1, px * 0.045);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx - tip * half, cy - open);
+  ctx.lineTo(cx + tip * half, cy);
+  ctx.lineTo(cx - tip * half, cy + open);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Lengte instellen met het begin (links) op zijn plek.
+export function setHairpinLength(it, len) {
+  const left = it.x - hairpinLength(it) / 2;
+  const k = Math.max(0.5, Math.min(15, len / (HAIRPIN_W * it.s)));
+  it.k = +k.toFixed(3);
+  it.x = +(left + hairpinLength(it) / 2).toFixed(4);
 }
 
 // Lettertype per soort teken: m = muziektekens (Noto Music), i = cursief

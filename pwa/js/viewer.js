@@ -8,7 +8,7 @@ import { loadPdf, renderPage, pageAspect, findContentBox } from "./pdf.js";
 import { getSong, saveSong, markOpened, rotatePages } from "./library.js";
 import { getSetlist } from "./setlists.js";
 import { settings, setSetting } from "./settings.js";
-import { loadInk, saveInk, drawInk, hitTest, strokeBounds, STAMP_GROUPS, STAMP_SIZES, COLORS, YELLOW, loadMusicFont } from "./ink.js";
+import { loadInk, saveInk, drawInk, hitTest, strokeBounds, isHairpin, hairpinLength, hairpinEnd, setHairpinLength, STAMP_GROUPS, STAMP_SIZES, COLORS, YELLOW, loadMusicFont } from "./ink.js";
 import { Metronome, tempoName } from "./metronome.js";
 import { $, h, fill, toast, dialog, promptDlg, confirmDlg, menu, fmtTime } from "./ui.js";
 import { icon } from "./icons.js";
@@ -1272,6 +1272,11 @@ function renderToolbar() {
       h("button", { type: "button", class: "tbtn", "aria-label": "Kleiner", title: "Kleiner", onclick: () => resizeStamp(-1) }, h("span", { class: "tsize small" }, "A")),
       h("button", { type: "button", class: "tbtn", "aria-label": "Groter", title: "Groter", onclick: () => resizeStamp(1) }, h("span", { class: "tsize" }, "A"))
     );
+    if (isHairpin(it))
+      extra.push(
+        h("button", { type: "button", class: "tbtn", "aria-label": "Korter", title: "Korter", onclick: () => stretchSelected(-1) }, h("span", { class: "tsize small" }, "\u2194")),
+        h("button", { type: "button", class: "tbtn", "aria-label": "Langer", title: "Langer", onclick: () => stretchSelected(1) }, h("span", { class: "tsize" }, "\u2194"))
+      );
     if (isText) extra.push(h("button", { type: "button", class: "tbtn", "aria-label": "Wijzigen", title: "Wijzigen", onclick: editSelected, html: icon("edit") }));
     extra.push(
       h("button", { type: "button", class: "tbtn", "aria-label": "Kopie", title: "Kopie", onclick: copySelected, html: icon("copy") }),
@@ -1367,6 +1372,7 @@ async function pickStamp(target = null) {
     pushUndo(st.selected.page);
     target.v = chosen.v;
     target.f = chosen.f;
+    if (!isHairpin(target)) delete target.k;
     saveSelected();
   } else if (chosen) {
     st.stamp = chosen;
@@ -1400,6 +1406,15 @@ function resizeStamp(dir) {
     setSetting("stampSize", Math.max(0, Math.min(STAMP_SIZES.length - 1, (S().stampSize ?? 2) + dir)));
     toast(["Heel klein", "Klein", "Normaal", "Groot", "Heel groot"][S().stampSize], 900);
   }
+}
+
+// Crescendo/decrescendo langer of korter maken (alleen in de breedte).
+function stretchSelected(dir) {
+  if (!st.selected || !isHairpin(st.selected.item)) return;
+  const it = st.selected.item;
+  pushUndo(st.selected.page);
+  setHairpinLength(it, hairpinLength(it) * (dir > 0 ? 1.25 : 0.8));
+  saveSelected();
 }
 
 function selectStamp(sel) {
@@ -1479,6 +1494,17 @@ function beginDraw(e) {
 
   // Geselecteerde krabbel aangeraakt: verslepen (met elk gereedschap behalve de gum).
   const sel = st.selected && st.selected.page === hit.page ? st.selected.item : null;
+  if (sel && st.tool !== "eraser" && isHairpin(sel)) {
+    // Bolletje aan het eind van een crescendo: langer/korter slepen.
+    const end = hairpinEnd(sel);
+    const ex = (end.x - hit.x) * pageW;
+    const ey = (end.y - hit.y) * pageW * hit.el._aspect;
+    if (Math.hypot(ex, ey) < 24) {
+      const d = { stretch: true, page: hit.page, el: hit.el, it: sel, items, before, x0: e.clientX, y0: e.clientY, cur: end, moved: false };
+      showLoupe(d, e.clientX, e.clientY);
+      return d;
+    }
+  }
   if (sel && st.tool !== "eraser" && itemAt(hit, [sel])) {
     const d = startMove(hit, sel, items, before);
     if (sel.t === "text") showLoupe(d, e.clientX, e.clientY);
@@ -1620,6 +1646,17 @@ function toPage(d, ev) {
 }
 
 function moveDraw(d, e) {
+  if (d.stretch) {
+    if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) return;
+    const q = toPage(d, e);
+    const left = d.it.x - hairpinLength(d.it) / 2;
+    setHairpinLength(d.it, q.x - left);
+    d.cur = hairpinEnd(d.it);
+    d.moved = true;
+    refreshInk(d.page);
+    showLoupe(d, e.clientX, e.clientY);
+    return;
+  }
   if (d.move) {
     const q = toPage(d, e);
     const dx = q.x - d.start.x;
@@ -1661,7 +1698,7 @@ function endDraw(d) {
   d.done = true;
   clearTimeout(d.lp);
   hideLoupe();
-  if (d.move && !d.moved) return renderToolbar();
+  if ((d.move || d.stretch) && !d.moved) return renderToolbar();
   if (d.erase && d.items.length === d.before.length) return;
   st.undo.push({ page: d.page, before: d.before });
   saveInk(st.song.id, d.page, d.items);
@@ -1673,9 +1710,9 @@ function abortDraw(d) {
   d.done = true;
   clearTimeout(d.lp);
   hideLoupe();
-  if (d.move || d.erase) {
+  if (d.move || d.erase || d.stretch) {
     st.ink.set(d.page, d.before);
-    if (d.move) selectStamp(null);
+    if (d.move || d.stretch) selectStamp(null);
   } else {
     d.items.splice(d.items.indexOf(d.it), 1);
   }
