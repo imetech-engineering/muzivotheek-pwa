@@ -210,7 +210,7 @@ async function renderSongs() {
           h("div", { class: "empty-ic", html: icon("music") }),
           h("h2", {}, "Nog geen bladmuziek"),
           h("p", {}, "Kies PDF's of foto's van je apparaat."),
-          h("button", { type: "button", class: "btn primary big", onclick: pickFiles, html: icon("plus") + "<span>Muziek toevoegen</span>" }),
+          h("button", { type: "button", class: "btn primary big", onclick: () => pickFilesMenu(importFiles), html: icon("plus") + "<span>Muziek toevoegen</span>" }),
           canLinkFolder() || canPickFolderOnce() || spConfigured()
             ? h("div", {}, h("button", { type: "button", class: "btn big second", onclick: addMenu, html: icon("folder") + `<span>${spConfigured() ? "Of uit SharePoint / een map" : "Of een hele map"}</span>` }))
             : null
@@ -461,26 +461,23 @@ async function mergeSel() {
 
 // Extra pagina's (PDF of foto's) achter een bestaand nummer.
 function appendPagesDlg(song) {
-  const input = h("input", { type: "file", accept: "application/pdf,.pdf,image/*,.jpg,.jpeg,.png", multiple: true, hidden: true });
-  input.onchange = async () => {
-    const files = [...input.files].sort((a, b) => a.name.localeCompare(b.name, "nl", { numeric: true }));
-    input.remove();
-    if (!files.length) return;
-    const prog = $("#progress");
-    prog.hidden = false;
-    prog.querySelector("span").textContent = "Pagina's toevoegen…";
-    prog.querySelector("i").style.width = "60%";
-    try {
-      const added = await appendFiles(song.id, files);
-      toast(`${added} ${added === 1 ? "pagina" : "pagina's"} toegevoegd aan "${song.title}"`, 2500);
-    } catch (e) {
-      toast(e.message, 4000);
-    } finally {
-      prog.hidden = true;
-    }
-  };
-  document.body.append(input);
-  input.click();
+  pickFilesMenu((files) => appendPages(song, files), "Pagina's toevoegen");
+}
+
+async function appendPages(song, picked) {
+  const files = picked.sort((a, b) => a.name.localeCompare(b.name, "nl", { numeric: true }));
+  const prog = $("#progress");
+  prog.hidden = false;
+  prog.querySelector("span").textContent = "Pagina's toevoegen…";
+  prog.querySelector("i").style.width = "60%";
+  try {
+    const added = await appendFiles(song.id, files);
+    toast(`${added} ${added === 1 ? "pagina" : "pagina's"} toegevoegd aan "${song.title}"`, 2500);
+  } catch (e) {
+    toast(e.message, 4000);
+  } finally {
+    prog.hidden = true;
+  }
 }
 
 async function pickSort() {
@@ -675,13 +672,15 @@ document.addEventListener("edit-song", (e) => editSong(e.detail.id, e.detail.onS
 
 // Plus-knop: kiezen hoe je nummers toevoegt.
 async function addMenu() {
-  const items = [{ label: "PDF of foto kiezen", value: "files", icon: icon("upload") }];
+  const items = [
+    { label: "PDF kiezen", value: "pdf", icon: icon("upload") },
+    { label: "Foto's kiezen", value: "photo", icon: icon("image") },
+  ];
   if (spConfigured()) items.push({ label: "Uit SharePoint", value: "sp", icon: icon("link") });
   if (canLinkFolder()) items.push({ label: "Map koppelen (blijft bijgewerkt)", value: "link", icon: icon("folder") });
   else if (canPickFolderOnce()) items.push({ label: "Hele map toevoegen", value: "once", icon: icon("folder") });
-  if (items.length === 1) return pickFiles();
   const v = await menu("Muziek toevoegen", items);
-  if (v === "files") pickFiles();
+  if (v === "pdf" || v === "photo") pickFiles(v, importFiles);
   if (v === "sp") openSharePoint();
   if (v === "once") importFiles(await pickFolderOnce());
   if (v === "link") {
@@ -716,12 +715,28 @@ async function runFolderSync(fn, doneLabel = "") {
   }
 }
 
-function pickFiles() {
-  const input = h("input", { type: "file", accept: "application/pdf,.pdf,image/*,.jpg,.jpeg,.png", multiple: true, hidden: true });
-  input.onchange = () => importFiles([...input.files]);
+// PDF en foto's apart kiezen: vraag je ze samen, dan zet Android er ook
+// "Camera" bij. Los opent PDF de bestanden en foto's de fotokiezer.
+const ACCEPT = { pdf: "application/pdf,.pdf", photo: "image/*" };
+
+function pickFiles(kind, onFiles) {
+  const input = h("input", { type: "file", accept: ACCEPT[kind], multiple: true, hidden: true });
+  input.onchange = () => {
+    const files = [...input.files];
+    input.remove();
+    if (files.length) onFiles(files);
+  };
   document.body.append(input);
   input.click();
   setTimeout(() => input.remove(), 60000);
+}
+
+async function pickFilesMenu(onFiles, title = "Muziek toevoegen") {
+  const v = await menu(title, [
+    { label: "PDF kiezen", value: "pdf", icon: icon("upload") },
+    { label: "Foto's kiezen", value: "photo", icon: icon("image") },
+  ]);
+  if (v) pickFiles(v, onFiles);
 }
 
 // files: File[] of [{file, folder}] (map importeren).
