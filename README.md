@@ -74,6 +74,13 @@ toont wat de tablet heeft, dus opnieuw verbinden na de camera-app gaat vanzelf g
 - **Eigen koppelserver** (als de gratis server ooit hapert): zet vóór het laden
   `window.MUZI_PEER = { host, port, path, secure }` (bijv. in `config.js`). Zie `js/phonelink.js`.
 - **Testen** lokaal: `npx peerjs --port 9000` en `window.MUZI_PEER = {host:"127.0.0.1", port:9000, path:"/", secure:false}`.
+- **Camera in de pagina** (`js/scancam.js`): Chrome blijft actief (met de losse camera-app kan Android
+  Chrome wegens geheugengebrek afsluiten). Grote foto's worden direct verkleind gedecodeerd.
+- **Scannen** (`js/docscan.js`, `js/scanedit.js`, OpenCV.js 4.12 in `vendor/opencv`, Apache-2.0): na elke
+  foto het blad zoeken, hoeken bijstellen (met vergrootglas), rechttrekken, papier wit maken
+  (delen door de geschatte achtergrond), contrast en verscherpen. Filters Zwart-wit (standaard),
+  Grijs, Kleur, Origineel; draaien. Tik op een pagina om opnieuw bij te snijden. OpenCV (± 3,5 MB
+  over de lijn) wordt alleen op de telefoon geladen en daar apart gecachet (`muzi-opencv-*`).
 - Code: `js/phonecam.js` (tablet), `js/scan.js` + `scan.html` (telefoon), `js/phonelink.js` (gedeeld),
   QR-code met `vendor/qrcode` (MIT).
 

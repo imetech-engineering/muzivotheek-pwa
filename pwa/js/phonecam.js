@@ -121,6 +121,21 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
     sendState();
   }
 
+  // Opnieuw bijgesneden op de telefoon: zelfde plek, nieuwe foto.
+  async function replacePage(msg) {
+    const p = pages.find((x) => x.id === msg.id);
+    if (!p) return sendState();
+    const blob = new Blob([msg.data], { type: "image/jpeg" });
+    try {
+      p.thumb = await blobToDataUrl((await shrinkImage(blob, 240)).blob);
+    } catch (e) {}
+    URL.revokeObjectURL(p.url);
+    p.blob = blob;
+    p.url = URL.createObjectURL(blob);
+    render();
+    sendState();
+  }
+
   // Alles toevoegen. opts leeg = de tablet vraagt zelf (één nummer of apart).
   async function finish(opts) {
     if (!pages.length || busy) return;
@@ -156,6 +171,7 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
   function onData(msg) {
     if (!msg || typeof msg !== "object") return;
     if (msg.t === "page" && msg.data) addPage(msg);
+    else if (msg.t === "replace" && msg.data) replacePage(msg);
     else if (msg.t === "remove") removePage(msg.id);
     else if (msg.t === "undo") undoRemove();
     else if (msg.t === "done") finish({ mode: msg.mode || "", name: msg.name ?? null });

@@ -2686,3 +2686,202 @@ body.cam-open {
     opacity: 0;
   }
 }
+
+/* Bijsnijden en verbeteren (scan.html) */
+.se {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  background: #101114;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  touch-action: none;
+}
+.se-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(8px + var(--safe-t)) 8px 8px;
+}
+.se-title {
+  flex: 1;
+  text-align: center;
+  font-weight: 700;
+  font-size: 17px;
+}
+.se-x,
+.se-sp {
+  width: 48px;
+  height: 48px;
+  flex: none;
+}
+.se-x {
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.se-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.se-frame {
+  position: relative;
+}
+.se-img,
+.se-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.se-svg {
+  overflow: visible;
+  touch-action: none;
+}
+.se-poly {
+  fill: rgba(255, 61, 139, 0.14);
+  stroke: #ff3d8b;
+  stroke-width: var(--sw, 2.5);
+  stroke-linejoin: round;
+}
+.se-handle {
+  fill: rgba(255, 255, 255, 0.9);
+  stroke: #ff3d8b;
+  stroke-width: var(--sw, 2.5);
+}
+.se-handle.on {
+  fill: #ff3d8b;
+}
+.se-result {
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  background: #fff;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5);
+}
+.se-loupe {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.se-loupe.right {
+  left: auto;
+  right: 12px;
+}
+.se-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(16, 17, 20, 0.6);
+  font-weight: 600;
+}
+.se-busy i {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  animation: se-spin 0.8s linear infinite;
+}
+@keyframes se-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.se-modes {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 0;
+  overflow-x: auto;
+}
+.se-mode {
+  flex: 1;
+  min-height: 42px;
+  border-radius: 21px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: none;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  padding: 0 10px;
+}
+.se-mode.on {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}
+.se-rot {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.se-bar {
+  flex: none;
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px calc(14px + var(--safe-b));
+}
+.se-bar .se-btn {
+  flex: 1;
+  min-height: 52px;
+}
+.se .btn:not(.primary) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+.se-btn .ic {
+  width: 20px;
+  height: 20px;
+}
+.pc-page img {
+  cursor: pointer;
+}
+.pc-edit {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(20, 22, 30, 0.6);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.pc-edit .ic {
+  width: 18px;
+  height: 18px;
+}

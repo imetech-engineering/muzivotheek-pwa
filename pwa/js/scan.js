@@ -5,10 +5,11 @@
 
 import { $, h, fill, toast, menu, promptDlg } from "./ui.js";
 import { icon } from "./icons.js";
-import { shrinkImage, isImageFile } from "./imgpdf.js";
+import { isImageFile } from "./imgpdf.js";
 import { applyTheme } from "./settings.js";
 import { PREFIX, loadPeer, randomId, peerOptions, peerErrorText } from "./phonelink.js";
 import { openCamera, cameraSupported } from "./scancam.js";
+import { editScan, preloadScanner } from "./scanedit.js";
 
 applyTheme();
 
@@ -37,6 +38,8 @@ const st = {
   waitingDone: false,
   fails: 0,
   counter: 0,
+  originals: new Map(), // id → {original, settings}: opnieuw bijsnijden
+  replacing: new Set(),
 };
 
 const connected = () => !!(st.conn && st.conn.open);
@@ -60,8 +63,10 @@ function render() {
   const tiles = st.pages.map((p, i) =>
     h(
       "div",
-      { class: "pc-page" },
-      h("img", { src: p.thumb || "", alt: `Pagina ${i + 1}` }),
+      { class: "pc-page" + (st.replacing.has(p.id) ? " sending" : "") },
+      h("img", { src: p.thumb || "", alt: `Pagina ${i + 1}`, onclick: () => reedit(p.id) }),
+      st.replacing.has(p.id) ? h("span", { class: "pc-sending" }, "Versturen…") : null,
+      st.originals.has(p.id) && !st.replacing.has(p.id) ? h("span", { class: "pc-edit", html: icon("crop") }) : null,
       h("span", { class: "pc-no" }, String(i + 1)),
       h("button", { type: "button", class: "pc-del", "aria-label": "Verwijderen", html: icon("trash"), disabled: !on, onclick: () => removePage(p.id) })
     )
@@ -94,12 +99,28 @@ function flush() {
   for (const x of st.pending) if (send({ t: "page", id: x.id, name: x.name, data: x.data })) x.sent = true;
 }
 
+// Opnieuw bijsnijden/verbeteren (alleen pagina's die in deze sessie gemaakt zijn).
+async function reedit(id) {
+  const o = st.originals.get(id);
+  if (!o || !o.original) return toast("Deze pagina kan hier niet meer aangepast worden. Verwijder hem en maak een nieuwe foto.", 3500);
+  const res = await editScan(o.original, o.settings);
+  if (!res) return;
+  st.originals.set(id, { original: o.original, settings: res.settings });
+  const data = await res.blob.arrayBuffer();
+  if (!send({ t: "replace", id, data })) return toast("Geen verbinding met de tablet", 3000);
+  st.replacing.add(id);
+  render();
+}
+
 async function addFiles(files) {
   files = files.filter(isImageFile);
   if (!files.length) return;
   for (const f of files) {
     try {
-      const { blob } = await shrinkImage(f);
+      // Bijsnijden en verbeteren; weggegooid = overslaan.
+      const res = await editScan(f);
+      if (!res) continue;
+      const blob = res.blob;
       const n = ++st.counter;
       const stamp = new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, ".");
       const item = {
@@ -110,6 +131,7 @@ async function addFiles(files) {
         url: URL.createObjectURL(blob),
       };
       st.pending.push(item);
+      if (res.original) st.originals.set(item.id, { original: res.original, settings: res.settings });
       render();
       flush();
     } catch (e) {
@@ -184,6 +206,7 @@ function onData(msg) {
     els.for.textContent = st.purpose === "append" ? `Pagina's toevoegen aan "${st.title}"` : "";
   } else if (msg.t === "state") {
     st.pages = Array.isArray(msg.pages) ? msg.pages : [];
+    st.replacing.clear();
     // Wat de tablet heeft, hoeft niet meer verstuurd te worden.
     st.pending = st.pending.filter((x) => {
       const got = st.pages.some((p) => p.id === x.id);
@@ -280,3 +303,4 @@ window.addEventListener("hashchange", () => location.reload());
 
 render();
 start();
+preloadScanner();
