@@ -8,6 +8,7 @@ import { icon } from "./icons.js";
 import { shrinkImage, isImageFile } from "./imgpdf.js";
 import { applyTheme } from "./settings.js";
 import { PREFIX, loadPeer, randomId, peerOptions, peerErrorText } from "./phonelink.js";
+import { openCamera, cameraSupported } from "./scancam.js";
 
 applyTheme();
 
@@ -130,7 +131,13 @@ function pick(capture) {
   setTimeout(() => input.remove(), 120000);
 }
 
-els.shoot.addEventListener("click", () => pick(true));
+els.shoot.addEventListener("click", () => {
+  // Camera in de pagina: Chrome blijft actief. Geen camera-toegang? Dan de camera-app.
+  if (!cameraSupported()) return pick(true);
+  openCamera((blob) => addFiles([new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })]), {
+    counter: () => (st.pages.length ? `${st.pages.length} op de tablet` : ""),
+  });
+});
 els.gallery.addEventListener("click", () => pick(false));
 
 els.done.addEventListener("click", async () => {

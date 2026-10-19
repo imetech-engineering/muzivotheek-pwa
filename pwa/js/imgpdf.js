@@ -6,11 +6,72 @@ export const isPdfFile = (f) => (f.type || "") === "application/pdf" || /\.pdf$/
 
 const MAX_SIDE = 2600; // genoeg voor scherp lezen, niet te zwaar
 
+// Afmetingen en EXIF-draaiing uit de JPEG-kop lezen, zonder de foto te decoderen.
+export async function jpegInfo(file) {
+  try {
+    const v = new DataView(await file.slice(0, 512 * 1024).arrayBuffer());
+    if (v.byteLength < 4 || v.getUint16(0) !== 0xffd8) return null;
+    let off = 2;
+    let orient = 1;
+    while (off + 9 < v.byteLength) {
+      if (v.getUint8(off) !== 0xff) {
+        off++;
+        continue;
+      }
+      const m = v.getUint8(off + 1);
+      if (m === 0xff || m === 0x01 || (m >= 0xd0 && m <= 0xd8)) {
+        off += m === 0xff ? 1 : 2;
+        continue;
+      }
+      const len = v.getUint16(off + 2);
+      if (m === 0xe1) orient = exifOrientation(v, off + 4, off + 2 + len) || orient;
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+        let h = v.getUint16(off + 5);
+        let w = v.getUint16(off + 7);
+        if (orient >= 5) [w, h] = [h, w];
+        return { w, h, orient };
+      }
+      off += 2 + len;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function exifOrientation(v, start, end) {
+  if (start + 14 > end || v.getUint32(start) !== 0x45786966) return 0; // "Exif"
+  const t = start + 6;
+  const le = v.getUint16(t) === 0x4949;
+  const u16 = (o) => v.getUint16(o, le);
+  const u32 = (o) => v.getUint32(o, le);
+  const ifd = t + u32(t + 4);
+  if (ifd + 2 > end) return 0;
+  const n = u16(ifd);
+  for (let i = 0; i < n; i++) {
+    const e = ifd + 2 + i * 12;
+    if (e + 12 > end) break;
+    if (u16(e) === 0x0112) return u16(e + 8);
+  }
+  return 0;
+}
+
+// Foto openen, grote camerafoto's (12 tot 200 MP) meteen verkleind decoderen.
+// Een volle 50 MP-foto kost honderden MB geheugen; daar loopt een telefoon op vast.
+export async function decodeImage(file, maxSide = MAX_SIDE) {
+  const info = await jpegInfo(file);
+  if (info && Math.max(info.w, info.h) > maxSide) {
+    const opt = info.w >= info.h ? { resizeWidth: maxSide } : { resizeHeight: maxSide };
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image", resizeQuality: "high", ...opt });
+    } catch (e) {}
+  }
+  return createImageBitmap(file, { imageOrientation: "from-image" });
+}
+
 async function toJpeg(file, maxSide = MAX_SIDE) {
   let bmp;
   try {
     // Draaiing van telefoonfoto's (EXIF) meteen goedzetten.
-    bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+    bmp = await decodeImage(file, maxSide);
   } catch (e) {
     // Terugval via <img>.
     const url = URL.createObjectURL(file);

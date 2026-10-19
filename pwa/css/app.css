@@ -2585,3 +2585,104 @@ body.scan-page main.scan-main {
 body.scan-page #toast {
   bottom: calc(var(--safe-b) + 96px);
 }
+
+/* Camera in de pagina (scan.html) */
+body.cam-open {
+  overflow: hidden;
+}
+.cam {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: #000;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+}
+.cam-video {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.cam-msg {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 40%;
+  text-align: center;
+  font-weight: 600;
+}
+.cam-count {
+  position: absolute;
+  top: calc(var(--safe-t) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 14px;
+  padding: 6px 12px;
+  font-weight: 700;
+  font-size: 14px;
+}
+.cam-count:empty {
+  display: none;
+}
+.cam-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 18px 16px calc(18px + var(--safe-b));
+  background: #000;
+}
+.cam-shutter {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 5px solid #fff;
+  background: rgba(255, 255, 255, 0.25);
+}
+.cam-shutter:active {
+  background: rgba(255, 255, 255, 0.7);
+}
+.cam-shutter:disabled {
+  opacity: 0.4;
+}
+.cam-side {
+  width: 54px;
+  height: 54px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cam-side[hidden] {
+  display: flex !important;
+  visibility: hidden;
+}
+.cam-side.on {
+  background: #ffd84d;
+  color: #000;
+}
+.cam-flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+.cam-flash.go {
+  animation: cam-flash 0.35s ease-out;
+}
+@keyframes cam-flash {
+  0% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+  }
+}

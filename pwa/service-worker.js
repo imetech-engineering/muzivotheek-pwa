@@ -34,6 +34,7 @@ const ASSETS = [
   "./js/phonecam.js",
   "./js/phonelink.js",
   "./js/scan.js",
+  "./js/scancam.js",
   "./scan.html",
   "./vendor/peerjs/peerjs.min.js",
   "./vendor/qrcode/qrcode.mjs",
