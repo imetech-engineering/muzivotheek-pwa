@@ -9,6 +9,9 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
   daarna uit de tekst in de PDF, en bij scans/foto's met OCR (tesseract.js, in de browser, eenmalig ± 9 MB,
   daarna offline). Zelf ingevulde velden worden nooit overschreven.
 - **Foto's** (JPG/PNG) worden bij het toevoegen een PDF; meerdere foto's kunnen samen één nummer worden.
+- **Scannen met telefoon**: tablet met een slechte camera? *+ → Scannen met telefoon* toont een QR-code.
+  Scan die met de telefoon, maak daar foto's (gewone camera-app of *Uit galerij*) en ze verschijnen meteen
+  op de tablet. Ook via *Pagina's toevoegen* bij een bestaand nummer. Zie hieronder.
 - **Bibliotheek**: PDF's toevoegen (kiezen, slepen, *Delen → Muzivotheek* vanuit WhatsApp/mail, of een
   hele map; op de computer blijft een gekoppelde map automatisch bijgewerkt, submap = Map),
   zoeken, sorteren (titel, componist, map, nieuwste, laatst geopend, meest gespeeld),
@@ -40,6 +43,8 @@ pwa/                 statische site (GitHub Pages)
                      ink.js (krabbels), pdf.js, db.js (IndexedDB), backup.js,
                      metronome.js, tuner.js, settings.js, ui.js, icons.js
   vendor/pdfjs/      pdf.js 4.10.38 (legacy build, Apache-2.0)
+  scan.html          telefoonpagina voor "Scannen met telefoon"
+  vendor/peerjs/     PeerJS 1.5.5 (MIT), vendor/qrcode/ qrcode-generator 2.0.4 (MIT)
   service-worker.js  offline-cache + share target
 .github/workflows/deploy.yml
 ```
@@ -55,6 +60,22 @@ en `js/update.js` vervangen door datum + commit. De app controleert bij openen,
 bij terugkeren en elk half uur, en toont dan *Nieuwe versie beschikbaar →
 Bijwerken*. Terwijl de lezer open is wacht de melding tot je hem sluit.
 Handmatig kan via Instellingen → *Controleren op updates*.
+
+## Scannen met telefoon
+
+De telefoon opent `scan.html#<code>` (via de QR-code) in de browser; installeren is niet nodig.
+Foto's worden op de telefoon verkleind (max. 2600 px) en rechtstreeks naar de tablet gestuurd
+via WebRTC ([PeerJS](https://peerjs.com), `vendor/peerjs`, MIT). De tablet bewaart ze; de telefoon
+toont wat de tablet heeft, dus opnieuw verbinden na de camera-app gaat vanzelf goed.
+
+- **Koppelen** gaat één keer via de gratis PeerJS-koppelserver (`0.peerjs.com`); de foto's zelf gaan
+  direct van apparaat naar apparaat (zelfde wifi), of via de PeerJS-relay als dat niet lukt.
+  Er wordt niets bewaard. Beide apparaten hebben internet nodig voor het koppelen.
+- **Eigen koppelserver** (als de gratis server ooit hapert): zet vóór het laden
+  `window.MUZI_PEER = { host, port, path, secure }` (bijv. in `config.js`). Zie `js/phonelink.js`.
+- **Testen** lokaal: `npx peerjs --port 9000` en `window.MUZI_PEER = {host:"127.0.0.1", port:9000, path:"/", secure:false}`.
+- Code: `js/phonecam.js` (tablet), `js/scan.js` + `scan.html` (telefoon), `js/phonelink.js` (gedeeld),
+  QR-code met `vendor/qrcode` (MIT).
 
 ## SharePoint zonder account
 

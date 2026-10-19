@@ -6,7 +6,7 @@ export const isPdfFile = (f) => (f.type || "") === "application/pdf" || /\.pdf$/
 
 const MAX_SIDE = 2600; // genoeg voor scherp lezen, niet te zwaar
 
-async function toJpeg(file) {
+async function toJpeg(file, maxSide = MAX_SIDE) {
   let bmp;
   try {
     // Draaiing van telefoonfoto's (EXIF) meteen goedzetten.
@@ -27,7 +27,7 @@ async function toJpeg(file) {
   }
   const w0 = bmp.width;
   const h0 = bmp.height;
-  const k = Math.min(1, MAX_SIDE / Math.max(w0, h0));
+  const k = Math.min(1, maxSide / Math.max(w0, h0));
   const w = Math.max(1, Math.round(w0 * k));
   const h = Math.max(1, Math.round(h0 * k));
   const c = document.createElement("canvas");
@@ -40,7 +40,13 @@ async function toJpeg(file) {
   if (bmp.close) bmp.close();
   const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.9));
   c.width = c.height = 0;
-  return { bytes: new Uint8Array(await blob.arrayBuffer()), w, h };
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), blob, w, h };
+}
+
+// Foto verkleinen tot een handzame JPEG (telefoon → tablet versturen, voorbeeldjes).
+export async function shrinkImage(file, maxSide = MAX_SIDE) {
+  const { blob, w, h } = await toJpeg(file, maxSide);
+  return { blob, w, h };
 }
 
 // Minimale PDF met per pagina één JPEG (DCTDecode: de JPEG gaat er ongewijzigd in).

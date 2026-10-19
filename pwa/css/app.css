@@ -2370,3 +2370,218 @@ textarea {
     gap: 3px;
   }
 }
+
+/* ---------- Scannen met telefoon (tablet-pop-up en telefoonpagina) ---------- */
+.dlg.pc-dlg {
+  max-width: 640px;
+}
+.pc-wrap {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 4px;
+}
+.pc-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.pc-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: pc-pulse 1.4s ease-in-out infinite;
+}
+.pc-status[data-kind="ok"] {
+  color: var(--ok);
+}
+.pc-status[data-kind="ok"] .pc-dot {
+  background: var(--ok);
+  animation: none;
+}
+.pc-status[data-kind="warn"] .pc-dot {
+  background: #e0a100;
+}
+.pc-status[data-kind="err"] {
+  color: var(--danger);
+}
+.pc-status[data-kind="err"] .pc-dot {
+  background: var(--danger);
+  animation: none;
+}
+@keyframes pc-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.pc-connect {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+.pc-qr {
+  flex: none;
+  width: 220px;
+  height: 220px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--card-2);
+}
+.pc-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.pc-steps p {
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.pc-link {
+  font-size: 12px;
+  color: var(--text-3);
+  word-break: break-all;
+  user-select: all;
+}
+@media (max-width: 560px) {
+  .pc-connect {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pc-qr {
+    width: min(240px, 100%);
+    height: auto;
+    aspect-ratio: 1;
+    margin: 0 auto;
+  }
+}
+.pc-pages {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+.pc-page {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+}
+.pc-page img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pc-no {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 12px;
+  background: rgba(20, 22, 30, 0.75);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-del {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(20, 22, 30, 0.7);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-del .ic {
+  width: 20px;
+  height: 20px;
+}
+.pc-page.sending img {
+  opacity: 0.45;
+}
+.pc-sending {
+  position: absolute;
+  inset: auto 0 8px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+.pc-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 26px 0;
+  color: var(--text-3);
+  border: 2px dashed var(--line);
+  border-radius: 14px;
+}
+.pc-empty .ic {
+  width: 34px;
+  height: 34px;
+}
+.pc-btns {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0 14px;
+}
+.pc-btns .btn {
+  flex: 1;
+}
+
+/* Telefoonpagina (scan.html) */
+body.scan-page main.scan-main {
+  padding: 16px 16px 24px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+.scan-for {
+  margin: 0;
+  font-weight: 700;
+}
+.scan-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.scan-actions .btn .ic {
+  width: 24px;
+  height: 24px;
+}
+.scan-tip {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.scan-foot {
+  flex: none;
+  padding: 12px 16px calc(12px + var(--safe-b));
+  background: var(--card);
+  border-top: 1px solid var(--line);
+}
+.scan-foot .btn {
+  width: 100%;
+}
+.btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+body.scan-page #toast {
+  bottom: calc(var(--safe-b) + 96px);
+}

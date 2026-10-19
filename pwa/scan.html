@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="nl" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#465e9e" />
+    <meta name="robots" content="noindex" />
+    <title>Scannen voor MuzIVOtheek</title>
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body class="scan-page">
+    <header class="app-header">
+      <img class="brand-logo" src="branding/eendracht.png" alt="Eendracht Aalten" />
+      <div class="brand-name">Scannen</div>
+    </header>
+
+    <main class="scan-main">
+      <div class="pc-status" id="status"><i class="pc-dot"></i><span>Verbinden met de tablet…</span></div>
+      <p class="scan-for" id="for" hidden></p>
+
+      <div class="scan-actions">
+        <button type="button" class="btn primary big" id="shoot" disabled></button>
+        <button type="button" class="btn big" id="gallery" disabled></button>
+      </div>
+      <p class="scan-tip">Tip: leg het blad plat in goed licht en vul het beeld. Liever een scan-app (bijv. Genius Scan) die het blad rechttrekt? Scan daar, sla op als foto en kies hier <b>Uit galerij</b>.</p>
+
+      <div class="pc-pages" id="pages"></div>
+    </main>
+
+    <footer class="scan-foot">
+      <button type="button" class="btn primary big" id="done" disabled>Klaar, toevoegen op tablet</button>
+    </footer>
+
+    <div id="progress" class="progress" hidden><span></span><div class="bar"><i></i></div></div>
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="js/scan.js"></script>
+  </body>
+</html>

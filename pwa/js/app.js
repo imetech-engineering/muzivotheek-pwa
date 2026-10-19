@@ -13,6 +13,7 @@ import { $, $$, h, fill, toast, dialog, confirmDlg, promptDlg, menu, fmtBytes, f
 import { icon } from "./icons.js";
 import { parseYouTube, pickYouTube } from "./youtube.js";
 import { isImageFile, isPdfFile } from "./imgpdf.js";
+import { scanWithPhone } from "./phonecam.js";
 import { recognizeSong, recognizeInfo, queueRecognize, cleanBadRecognition } from "./recognize.js";
 import { isGarbageName } from "./names.js";
 import { canLinkFolder, canPickFolderOnce, linkFolder, unlinkFolder, folderSources, syncFolder, syncAllFolders, regrantAndSync, pickFolderOnce } from "./folders.js";
@@ -461,7 +462,7 @@ async function mergeSel() {
 
 // Extra pagina's (PDF of foto's) achter een bestaand nummer.
 function appendPagesDlg(song) {
-  pickFilesMenu((files) => appendPages(song, files), "Pagina's toevoegen");
+  pickFilesMenu((files) => appendPages(song, files), "Pagina's toevoegen", song);
 }
 
 async function appendPages(song, picked) {
@@ -472,9 +473,12 @@ async function appendPages(song, picked) {
   prog.querySelector("i").style.width = "60%";
   try {
     const added = await appendFiles(song.id, files);
-    toast(`${added} ${added === 1 ? "pagina" : "pagina's"} toegevoegd aan "${song.title}"`, 2500);
+    const text = `${added} ${added === 1 ? "pagina" : "pagina's"} toegevoegd aan "${song.title}"`;
+    toast(text, 2500);
+    return text;
   } catch (e) {
     toast(e.message, 4000);
+    throw e;
   } finally {
     prog.hidden = true;
   }
@@ -675,12 +679,14 @@ async function addMenu() {
   const items = [
     { label: "PDF kiezen", value: "pdf", icon: icon("upload") },
     { label: "Foto's kiezen", value: "photo", icon: icon("image") },
+    { label: "Scannen met telefoon", value: "phone", icon: icon("phone") },
   ];
   if (spConfigured()) items.push({ label: "Uit SharePoint", value: "sp", icon: icon("link") });
   if (canLinkFolder()) items.push({ label: "Map koppelen (blijft bijgewerkt)", value: "link", icon: icon("folder") });
   else if (canPickFolderOnce()) items.push({ label: "Hele map toevoegen", value: "once", icon: icon("folder") });
   const v = await menu("Muziek toevoegen", items);
   if (v === "pdf" || v === "photo") pickFiles(v, importFiles);
+  if (v === "phone") scanWithPhone({ purpose: "import", onDone: (files, opts) => importFiles(files, opts) });
   if (v === "sp") openSharePoint();
   if (v === "once") importFiles(await pickFolderOnce());
   if (v === "link") {
@@ -731,32 +737,40 @@ function pickFiles(kind, onFiles) {
   setTimeout(() => input.remove(), 60000);
 }
 
-async function pickFilesMenu(onFiles, title = "Muziek toevoegen") {
+// song: bij pagina's toevoegen aan een bestaand nummer (dan kan het ook met de telefoon).
+async function pickFilesMenu(onFiles, title = "Muziek toevoegen", song = null) {
   const v = await menu(title, [
     { label: "PDF kiezen", value: "pdf", icon: icon("upload") },
     { label: "Foto's kiezen", value: "photo", icon: icon("image") },
-  ]);
-  if (v) pickFiles(v, onFiles);
+    song ? { label: "Scannen met telefoon", value: "phone", icon: icon("phone") } : null,
+  ].filter(Boolean));
+  if (v === "phone") scanWithPhone({ purpose: "append", title: song.title, onDone: (files) => onFiles(files) });
+  else if (v) pickFiles(v, onFiles);
 }
 
 // files: File[] of [{file, folder}] (map importeren).
-async function importFiles(files) {
+// opts (scannen met telefoon): {mode: "one"|"each", name} → dan niet nog eens vragen.
+// Geeft een korte samenvatting terug, of null als er geannuleerd is.
+async function importFiles(files, opts = {}) {
   let items = files.map((f) => (f instanceof Blob ? { file: f, folder: null } : f));
   items = items.filter(({ file: f }) => isPdfFile(f) || isImageFile(f));
-  if (!items.length) return toast("Kies een PDF of foto");
+  if (!items.length) {
+    toast("Kies een PDF of foto");
+    return null;
+  }
   // Meerdere foto's: één nummer met meerdere pagina's, of elke foto apart?
   const photos = items.filter(({ file: f }) => isImageFile(f) && !isPdfFile(f));
   if (photos.length > 1) {
-    const how = await menu(`${photos.length} foto's`, [
+    const how = opts.mode || await menu(`${photos.length} foto's`, [
       { label: "Eén nummer (meerdere pagina's)", value: "one", icon: icon("copy") },
       { label: "Elke foto apart", value: "each", icon: icon("grid") },
     ]);
-    if (!how) return;
+    if (!how) return null;
     if (how === "one") {
       // Op naam sorteren, zodat pagina 1, 2, 3 in de goede volgorde staan.
       const sorted = photos.map((p) => p.file).sort((a, b) => a.name.localeCompare(b.name, "nl", { numeric: true }));
-      const name = await promptDlg("Naam van het nummer", "", { placeholder: "Leeg = automatisch herkennen" });
-      if (name == null) return;
+      const name = opts.name != null ? opts.name : await promptDlg("Naam van het nummer", "", { placeholder: "Leeg = automatisch herkennen" });
+      if (name == null) return null;
       items = items.filter((it) => !photos.includes(it));
       items.unshift({ file: sorted, folder: photos[0].folder, name: name ? name + ".jpg" : sorted[0].name });
     }
@@ -789,6 +803,7 @@ async function importFiles(files) {
   toast(bits.join(", "), 3000);
   if (state.tab !== "songs") setTab("songs");
   else renderSongs();
+  return bits.join(", ");
 }
 
 // Drag & drop (computer).
