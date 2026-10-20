@@ -10,8 +10,8 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
   daarna offline). Zelf ingevulde velden worden nooit overschreven.
 - **Foto's** (JPG/PNG) worden bij het toevoegen een PDF; meerdere foto's kunnen samen één nummer worden.
 - **Scannen met telefoon**: tablet met een slechte camera? *+ → Scannen met telefoon* toont een QR-code.
-  Scan die met de telefoon, maak daar foto's (gewone camera-app of *Uit galerij*) en ze verschijnen meteen
-  op de tablet. Ook via *Pagina's toevoegen* bij een bestaand nummer. Zie hieronder.
+  Scan die met de telefoon, maak daar foto's (camera of *Uit galerij*); ze worden automatisch bijgesneden,
+  rechtgetrokken en verbeterd en verschijnen meteen op de tablet. Ook via *Pagina's toevoegen* bij een bestaand nummer. Zie hieronder.
 - **Bibliotheek**: PDF's toevoegen (kiezen, slepen, *Delen → Muzivotheek* vanuit WhatsApp/mail, of een
   hele map; op de computer blijft een gekoppelde map automatisch bijgewerkt, submap = Map),
   zoeken, sorteren (titel, componist, map, nieuwste, laatst geopend, meest gespeeld),
@@ -77,10 +77,18 @@ toont wat de tablet heeft, dus opnieuw verbinden na de camera-app gaat vanzelf g
 - **Camera in de pagina** (`js/scancam.js`): Chrome blijft actief (met de losse camera-app kan Android
   Chrome wegens geheugengebrek afsluiten). Grote foto's worden direct verkleind gedecodeerd.
 - **Scannen** (`js/docscan.js`, `js/scanedit.js`, OpenCV.js 4.12 in `vendor/opencv`, Apache-2.0): na elke
-  foto het blad zoeken, hoeken bijstellen (met vergrootglas), rechttrekken, papier wit maken
-  (delen door de geschatte achtergrond), contrast en verscherpen. Filters Zwart-wit (standaard),
-  Grijs, Kleur, Origineel; draaien. Tik op een pagina om opnieuw bij te snijden. OpenCV (± 3,5 MB
-  over de lijn) wordt alleen op de telefoon geladen en daar apart gecachet (`muzi-opencv-*`).
+  foto automatisch (zonder bevestigen) het blad zoeken, rechttrekken, papier wit maken (delen door de
+  geschatte achtergrond), contrast en verscherpen, en meteen naar de tablet. Laatste scan linksonder in
+  de camera. Tik op een pagina om te bekijken (knijpen/dubbeltik = inzoomen) en aan te passen: hoeken
+  (met vergrootglas), draaien, filter (Zwart-wit, Grijs, Kleur, Origineel), *Krom blad rechttrekken*,
+  *Opnieuw* (nieuwe foto op dezelfde plek) of verwijderen. Niet gevonden blad = oranje "!" op de pagina.
+  Filter en kromming worden onthouden voor de volgende foto's. OpenCV (± 3,5 MB over de lijn) wordt
+  alleen op de telefoon geladen en daar apart gecachet (`muzi-opencv-*`).
+- **Krom blad** (`dewarp` in `js/docscan.js`): de notenbalken horen recht te lopen. Het blad wordt in
+  staande stroken geknipt; per strook wordt gemeten hoeveel het lijnenpatroon verschuift t.o.v. de
+  buurstrook, dat wordt per hoogte glad gemaakt (kromme graad 3) en de pixels worden teruggeschoven.
+- **Scherm aan**: tablet en telefoon houden het scherm aan zolang scannen open is (wake lock). Valt de
+  tablet toch even uit, dan blijft de telefoon proberen en worden wachtende foto's daarna verstuurd.
 - Code: `js/phonecam.js` (tablet), `js/scan.js` + `scan.html` (telefoon), `js/phonelink.js` (gedeeld),
   QR-code met `vendor/qrcode` (MIT).
 

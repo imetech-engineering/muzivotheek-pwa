@@ -30,6 +30,34 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
   let peer = null;
   let closed = false;
   let busy = false;
+  let wake = null;
+
+  // Tablet niet in slaap laten vallen terwijl je op de telefoon foto's maakt:
+  // dan valt de verbinding weg.
+  async function keepAwake() {
+    try {
+      if (!closed && !wake && navigator.wakeLock && document.visibilityState === "visible") {
+        wake = await navigator.wakeLock.request("screen");
+        wake.addEventListener("release", () => (wake = null));
+      }
+    } catch (e) {}
+  }
+  const onVisible = () => {
+    if (document.visibilityState !== "visible" || closed) return;
+    keepAwake();
+    // Toch even uit geweest: weer aanmelden bij de koppelserver, zodat de telefoon ons vindt.
+    if (peer && !peer.destroyed && peer.disconnected) {
+      try {
+        peer.reconnect();
+      } catch (e) {}
+    }
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  const stopAwake = () => {
+    document.removeEventListener("visibilitychange", onVisible);
+    if (wake) wake.release().catch(() => {});
+    wake = null;
+  };
 
   const statusText = h("span", {}, "Verbinden…");
   const status = h("div", { class: "pc-status" }, h("i", { class: "pc-dot" }), statusText);
@@ -253,6 +281,7 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
       if (!(await confirmDlg("Weggooien?", "De foto's van de telefoon worden niet bewaard.", "Weggooien", true))) return;
     }
     closed = true;
+    stopAwake();
     send({ t: "closed", text: "Gesloten op de tablet" });
     setTimeout(() => {
       try {
@@ -272,6 +301,7 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
       // De pop-up is al weg; bij foto's die er nog zijn toch even vragen.
       const keep = pages.length;
       closed = true;
+      stopAwake();
       send({ t: "closed", text: "Gesloten op de tablet" });
       if (keep) {
         const files = pages.map((x) => new File([x.blob], x.name, { type: "image/jpeg" }));
@@ -287,5 +317,6 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
       }, 300);
     }
   });
+  keepAwake();
   start();
 }

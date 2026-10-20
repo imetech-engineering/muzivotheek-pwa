@@ -2768,6 +2768,75 @@ body.cam-open {
   max-height: calc(100% - 32px);
   background: #fff;
   box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5);
+  transform-origin: 0 0; /* inzoomen (zoomable in scanedit.js) */
+  will-change: transform;
+}
+.se-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: se-hint 4s forwards;
+}
+@keyframes se-hint {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.se-extra {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: 8px 8px 0;
+}
+.se-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 14px 0 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: none;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+}
+.se-chip i {
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.25);
+  position: relative;
+  transition: background 0.15s;
+}
+.se-chip i::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.se-chip.on i {
+  background: #ff3d8b;
+}
+.se-chip.on i::after {
+  transform: translateX(14px);
 }
 .se-loupe {
   position: absolute;
@@ -2817,16 +2886,17 @@ body.cam-open {
   overflow-x: auto;
 }
 .se-mode {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 42px;
   border-radius: 21px;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: none;
   color: #fff;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   white-space: nowrap;
-  padding: 0 10px;
+  padding: 0 4px;
 }
 .se-mode.on {
   background: #fff;
@@ -2835,8 +2905,8 @@ body.cam-open {
 }
 .se-rot {
   flex: none;
-  width: 42px;
-  height: 42px;
+  width: 38px;
+  height: 38px;
   border: 0;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.12);
@@ -2884,4 +2954,30 @@ body.cam-open {
 .pc-edit .ic {
   width: 18px;
   height: 18px;
+}
+.pc-edit.warn {
+  background: #f59e0b;
+  color: #000;
+  font-weight: 800;
+  font-size: 18px;
+}
+/* Laatste scan, linksonder in de camera */
+.cam-thumb {
+  position: absolute;
+  left: 16px;
+  bottom: calc(130px + var(--safe-b));
+  width: 64px;
+  height: 84px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #222;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+.cam-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }

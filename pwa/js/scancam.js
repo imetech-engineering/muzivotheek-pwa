@@ -3,7 +3,9 @@
 // geheugengebrek, en dan is de foto weg.
 //
 // openCamera(onShot) houdt de camera open; onShot(blob) wordt per foto aangeroepen
-// (en mag een Promise teruggeven, bijv. het bijsnijscherm). Klaar = sluiten.
+// (en mag een Promise teruggeven, bijv. het verwerken). Klaar = sluiten.
+// Opties: single = na één foto dicht (opnieuw maken); thumb() = {url} van de
+// laatste scan, linksonder; tikken = onThumb() (camera staat dan even uit).
 
 import { h } from "./ui.js";
 import { icon } from "./icons.js";
@@ -12,7 +14,7 @@ export const cameraSupported = () => !!(navigator.mediaDevices && navigator.medi
 
 const ICON_FLASH = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>';
 
-export function openCamera(onShot, { counter = () => "" } = {}) {
+export function openCamera(onShot, { counter = () => "", single = false, thumb = null, onThumb = null } = {}) {
   return new Promise(async (resolve) => {
     let stream = null;
     let track = null;
@@ -26,6 +28,8 @@ export function openCamera(onShot, { counter = () => "" } = {}) {
     const flashBtn = h("button", { type: "button", class: "cam-side", "aria-label": "Lamp", html: ICON_FLASH, hidden: true });
     const closeBtn = h("button", { type: "button", class: "cam-side", "aria-label": "Klaar", html: icon("close") });
     const shutter = h("button", { type: "button", class: "cam-shutter", "aria-label": "Foto maken", disabled: true });
+    const thumbImg = h("img", { alt: "" });
+    const thumbBtn = h("button", { type: "button", class: "cam-thumb", "aria-label": "Laatste scan bekijken", hidden: true }, thumbImg);
     const flash = h("div", { class: "cam-flash" });
     const root = h(
       "div",
@@ -35,12 +39,18 @@ export function openCamera(onShot, { counter = () => "" } = {}) {
       msg,
       
       h("div", { class: "cam-bar" }, closeBtn, shutter, flashBtn),
+      thumbBtn,
       count
     );
     document.body.append(root);
     document.body.classList.add("cam-open");
 
-    const updateCount = () => (count.textContent = counter() || "");
+    const updateCount = () => {
+      count.textContent = counter() || "";
+      const t = thumb && thumb();
+      thumbBtn.hidden = !t;
+      if (t && thumbImg.src !== t.url) thumbImg.src = t.url;
+    };
     updateCount();
 
     function stop() {
@@ -115,6 +125,7 @@ export function openCamera(onShot, { counter = () => "" } = {}) {
         // Camera even uit tijdens het verwerken: scheelt veel geheugen op de telefoon.
         stop();
         if (blob) await onShot(blob);
+        if (single && blob) return close();
       } catch (e) {
         console.error(e);
       } finally {
@@ -137,6 +148,28 @@ export function openCamera(onShot, { counter = () => "" } = {}) {
     });
 
     closeBtn.addEventListener("click", close);
+
+    thumbBtn.addEventListener("click", async () => {
+      if (busy || !onThumb) return;
+      busy = true;
+      stop();
+      shutter.disabled = true;
+      root.hidden = true;
+      try {
+        await onThumb();
+      } catch (e) {
+        console.error(e);
+      } finally {
+        busy = false;
+        root.hidden = false;
+        updateCount();
+        if (root.isConnected && !stream && document.visibilityState === "visible") {
+          msg.textContent = "Camera starten…";
+          msg.hidden = false;
+          await start();
+        }
+      }
+    });
 
     // Scherm uit en weer aan: camera opnieuw starten.
     const onVis = () => {

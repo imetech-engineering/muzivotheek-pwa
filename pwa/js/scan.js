@@ -1,7 +1,8 @@
 // Telefoon-kant van "Scannen met telefoon" (scan.html, geopend via de QR-code op de tablet).
-// Foto's maken met de gewone camera-app van de telefoon (beste kwaliteit), verkleinen
-// en direct naar de tablet sturen. De tablet bewaart ze; deze pagina toont wat de
-// tablet heeft (zie phonelink.js).
+// Foto maken → blad automatisch zoeken, rechttrekken en verbeteren → meteen naar de
+// tablet. Tik op een pagina om te bekijken (inzoomen) en aan te passen, opnieuw te
+// maken of te verwijderen. De tablet bewaart ze; deze pagina toont wat de tablet
+// heeft (zie phonelink.js).
 
 import { $, h, fill, toast, menu, promptDlg } from "./ui.js";
 import { icon } from "./icons.js";
@@ -9,7 +10,7 @@ import { isImageFile } from "./imgpdf.js";
 import { applyTheme } from "./settings.js";
 import { PREFIX, loadPeer, randomId, peerOptions, peerErrorText } from "./phonelink.js";
 import { openCamera, cameraSupported } from "./scancam.js";
-import { editScan, preloadScanner } from "./scanedit.js";
+import { autoScan, editScan, preloadScanner } from "./scanedit.js";
 
 applyTheme();
 
@@ -38,8 +39,10 @@ const st = {
   waitingDone: false,
   fails: 0,
   counter: 0,
-  originals: new Map(), // id → {original, settings}: opnieuw bijsnijden
+  originals: new Map(), // id → {original, settings, found}: aanpassen
   replacing: new Set(),
+  last: null, // {id, url}: laatste scan (voorbeeldje in de camera)
+  wake: null,
 };
 
 const connected = () => !!(st.conn && st.conn.open);
@@ -66,7 +69,11 @@ function render() {
       { class: "pc-page" + (st.replacing.has(p.id) ? " sending" : "") },
       h("img", { src: p.thumb || "", alt: `Pagina ${i + 1}`, onclick: () => reedit(p.id) }),
       st.replacing.has(p.id) ? h("span", { class: "pc-sending" }, "Versturen…") : null,
-      st.originals.has(p.id) && !st.replacing.has(p.id) ? h("span", { class: "pc-edit", html: icon("crop") }) : null,
+      st.originals.has(p.id) && !st.replacing.has(p.id)
+        ? st.originals.get(p.id).found === false
+          ? h("span", { class: "pc-edit warn", title: "Blad niet gevonden: tik om de hoeken te zetten" }, "!")
+          : h("span", { class: "pc-edit", html: icon("crop") })
+        : null,
       h("span", { class: "pc-no" }, String(i + 1)),
       h("button", { type: "button", class: "pc-del", "aria-label": "Verwijderen", html: icon("trash"), disabled: !on, onclick: () => removePage(p.id) })
     )
@@ -99,54 +106,95 @@ function flush() {
   for (const x of st.pending) if (send({ t: "page", id: x.id, name: x.name, data: x.data })) x.sent = true;
 }
 
-// Opnieuw bijsnijden/verbeteren (alleen pagina's die in deze sessie gemaakt zijn).
+// Bekijken en aanpassen (alleen pagina's die in deze sessie gemaakt zijn).
 async function reedit(id) {
   const o = st.originals.get(id);
   if (!o || !o.original) return toast("Deze pagina kan hier niet meer aangepast worden. Verwijder hem en maak een nieuwe foto.", 3500);
-  const res = await editScan(o.original, o.settings);
+  const nr = st.pages.findIndex((p) => p.id === id) + 1;
+  const res = await editScan(o.original, { ...o.settings, found: o.found }, { title: nr ? `Pagina ${nr}` : "Aanpassen" });
   if (!res) return;
-  st.originals.set(id, { original: o.original, settings: res.settings });
+  if (res.remove) return removePage(id);
+  if (res.retake) return retake(id);
+  await replaceWith(id, res);
+}
+
+async function replaceWith(id, res) {
+  st.originals.set(id, { original: res.original, settings: res.settings, found: res.found !== false });
   const data = await res.blob.arrayBuffer();
+  if (st.last && st.last.id === id) setLast(id, res.blob);
+  // Nog niet op de tablet: gewoon de nieuwe versie versturen i.p.v. de oude.
+  const waiting = st.pending.find((x) => x.id === id);
+  if (waiting && !st.pages.some((p) => p.id === id)) {
+    URL.revokeObjectURL(waiting.url);
+    Object.assign(waiting, { data, url: URL.createObjectURL(res.blob) });
+    render();
+    return flush();
+  }
   if (!send({ t: "replace", id, data })) return toast("Geen verbinding met de tablet", 3000);
   st.replacing.add(id);
   render();
+}
+
+function setLast(id, blob) {
+  if (st.last) URL.revokeObjectURL(st.last.url);
+  st.last = { id, url: URL.createObjectURL(blob) };
+}
+
+// Opnieuw maken: nieuwe foto op dezelfde plek.
+async function retake(id) {
+  const use = async (file) => {
+    const res = await scanOne(file);
+    if (res) await replaceWith(id, res);
+  };
+  if (!cameraSupported()) return pick(true, (files) => files[0] && use(files[0]));
+  await openCamera((blob) => use(new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })), { single: true });
+}
+
+// Eén foto verwerken, met wachtrij-melding.
+async function scanOne(file) {
+  progress("Blad zoeken en verbeteren…");
+  try {
+    return await autoScan(file);
+  } catch (e) {
+    console.error(e);
+    toast(`Foto "${file.name}" lukt niet`, 3000);
+    return null;
+  } finally {
+    progress("");
+  }
 }
 
 async function addFiles(files) {
   files = files.filter(isImageFile);
   if (!files.length) return;
   for (const f of files) {
-    try {
-      // Bijsnijden en verbeteren; weggegooid = overslaan.
-      const res = await editScan(f);
-      if (!res) continue;
-      const blob = res.blob;
-      const n = ++st.counter;
-      const stamp = new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, ".");
-      const item = {
-        id: randomId(10),
-        // "Scan 2026-10-19 21.40.12-1.jpg": zo herkent de app dat het geen titel is (dan OCR).
-        name: `Scan ${stamp}-${n}.jpg`,
-        data: await blob.arrayBuffer(),
-        url: URL.createObjectURL(blob),
-      };
-      st.pending.push(item);
-      if (res.original) st.originals.set(item.id, { original: res.original, settings: res.settings });
-      render();
-      flush();
-    } catch (e) {
-      console.error(e);
-      toast(`Foto "${f.name}" lukt niet`, 3000);
-    }
+    const res = await scanOne(f);
+    if (!res) continue;
+    const n = ++st.counter;
+    const stamp = new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, ".");
+    const item = {
+      id: randomId(10),
+      // "Scan 2026-10-19 21.40.12-1.jpg": zo herkent de app dat het geen titel is (dan OCR).
+      name: `Scan ${stamp}-${n}.jpg`,
+      data: await res.blob.arrayBuffer(),
+      url: URL.createObjectURL(res.blob),
+    };
+    st.pending.push(item);
+    if (res.original) st.originals.set(item.id, { original: res.original, settings: res.settings, found: res.found });
+    setLast(item.id, res.blob);
+    if (res.noScanner) toast("Scanner niet geladen (internet?). Foto gaat zonder verbetering.", 3500);
+    else if (!res.found) toast("Blad niet gevonden: hele foto gebruikt. Tik op de pagina om de hoeken te zetten.", 3500);
+    render();
+    flush();
   }
 }
 
-function pick(capture) {
+function pick(capture, onFiles = addFiles) {
   const input = h("input", { type: "file", accept: "image/*", capture: capture ? "environment" : null, multiple: capture ? null : true, hidden: true });
   input.onchange = () => {
     const files = [...input.files];
     input.remove();
-    addFiles(files);
+    onFiles(files);
   };
   document.body.append(input);
   input.click();
@@ -158,6 +206,8 @@ els.shoot.addEventListener("click", () => {
   if (!cameraSupported()) return pick(true);
   openCamera((blob) => addFiles([new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })]), {
     counter: () => (st.pages.length ? `${st.pages.length} op de tablet` : ""),
+    thumb: () => st.last,
+    onThumb: () => st.last && reedit(st.last.id),
   });
 });
 els.gallery.addEventListener("click", () => pick(false));
@@ -223,6 +273,7 @@ function onData(msg) {
   } else if (msg.t === "closed") {
     endWait();
     st.tabletClosed = true;
+    if (st.wake) st.wake.release().catch(() => {});
     setStatus(`${msg.text || "Gesloten op de tablet"}. Je kunt deze pagina sluiten.`, msg.text && /toegevoegd/i.test(msg.text) ? "ok" : "warn");
     try {
       st.conn && st.conn.close();
@@ -275,12 +326,18 @@ async function start() {
     console.warn("peer", e);
     if (st.tabletClosed) return;
     if (e.type === "peer-unavailable") {
-      // Tablet even weg (scherm uit?). Een paar keer opnieuw proberen.
-      if (++st.fails <= 5) {
-        setStatus("Tablet nog niet gevonden, opnieuw proberen…", "warn");
-        setTimeout(connect, 3000);
-        return;
-      }
+      // Tablet even weg (scherm uit?). Blijven proberen; foto's wachten zolang.
+      st.fails++;
+      const wait = Math.min(10000, 2000 + st.fails * 1000);
+      setStatus(
+        st.fails > 3
+          ? "Tablet niet bereikbaar. Staat het scherm van de tablet aan en is Scannen met telefoon nog open? Blijft proberen…"
+          : "Tablet nog niet gevonden, opnieuw proberen…",
+        "warn"
+      );
+      setTimeout(connect, wait);
+      render();
+      return;
     }
     setStatus(peerErrorText(e), "err");
     render();
@@ -292,9 +349,21 @@ async function start() {
   });
 }
 
+// Scherm aan houden zolang deze pagina open is.
+async function keepAwake() {
+  try {
+    if (navigator.wakeLock && document.visibilityState === "visible" && !st.tabletClosed && !st.wake) {
+      st.wake = await navigator.wakeLock.request("screen");
+      st.wake.addEventListener("release", () => (st.wake = null));
+    }
+  } catch (e) {}
+}
+
 // Terug van de camera-app of het scherm weer aan: verbinding nog goed?
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible" || st.tabletClosed || connected() || !st.peer) return;
+  if (document.visibilityState !== "visible") return;
+  keepAwake();
+  if (st.tabletClosed || connected() || !st.peer) return;
   st.fails = 0;
   connect();
 });
@@ -303,4 +372,5 @@ window.addEventListener("hashchange", () => location.reload());
 
 render();
 start();
+keepAwake();
 preloadScanner();
