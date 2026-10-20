@@ -1,9 +1,9 @@
-// Scannen op de telefoon (scan.html), zoals een scan-app:
-//   autoScan(foto): blad zoeken, rechttrekken en verbeteren zonder iets te vragen.
-//   editScan(origineel, instellingen): achteraf aanpassen. Resultaat bekijken en
-//     inzoomen, hoeken verslepen (met vergrootglas), draaien, filter kiezen,
-//     krom blad rechttrekken, opnieuw maken of verwijderen.
-// Instellingen: {quad, mode, rot, curve}.
+// Scannen op de telefoon (scan.html), zoals een scan-app. editScan:
+//   review: na een nieuwe foto. Blad wordt zelf gezocht, rechtgetrokken en verbeterd;
+//     je ziet meteen het resultaat en kiest Versturen, Opnieuw of weggooien.
+//   anders: een verstuurde pagina achteraf aanpassen.
+// In beide: inzoomen, hoeken verslepen (met vergrootglas), draaien, filter kiezen,
+// krom blad rechttrekken. Instellingen: {quad, mode, rot, curve}.
 
 import { h, toast } from "./ui.js";
 import { icon } from "./icons.js";
@@ -13,32 +13,31 @@ import { loadCv, detectQuad, warp, dewarp, enhance, matToCanvas, fullQuad } from
 const MODES = [
   ["bw", "Zwart-wit"],
   ["gray", "Grijs"],
-  ["color", "Kleur"],
-  ["orig", "Origineel"],
 ];
-const MODE_KEY = "muzivotheek.scanMode";
-const CURVE_KEY = "muzivotheek.scanCurve";
+const PREFS_KEY = "muzivotheek.scanPrefs";
+const DEFAULTS = { mode: "bw", level: 0, speck: true, curve: false };
 
-function savedMode() {
+// Laatste keuzes (filter, schuifje, spikkels, krom blad) gelden voor de volgende foto.
+function prefs() {
+  let p = {};
   try {
-    const m = localStorage.getItem(MODE_KEY);
-    if (MODES.some(([v]) => v === m)) return m;
+    p = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") || {};
   } catch (e) {}
-  return "bw";
+  return clean({ ...DEFAULTS, ...p });
 }
 
-function savedCurve() {
-  try {
-    return localStorage.getItem(CURVE_KEY) === "1";
-  } catch (e) {
-    return false;
-  }
+function clean(p) {
+  return {
+    mode: MODES.some(([v]) => v === p.mode) ? p.mode : "bw",
+    level: Math.max(-5, Math.min(5, Math.round(+p.level || 0))),
+    speck: p.speck !== false,
+    curve: !!p.curve,
+  };
 }
 
 function savePrefs(s) {
   try {
-    localStorage.setItem(MODE_KEY, s.mode);
-    localStorage.setItem(CURVE_KEY, s.curve ? "1" : "0");
+    localStorage.setItem(PREFS_KEY, JSON.stringify(clean(s)));
   } catch (e) {}
 }
 
@@ -96,7 +95,7 @@ function makePipeline(cv, full) {
         }
         key = k;
       }
-      const m = enhance(cv, mat, s.mode);
+      const m = enhance(cv, mat, s.mode, { level: s.level, speck: s.speck });
       try {
         return matToCanvas(cv, m, s.rot, canvas);
       } finally {
@@ -110,45 +109,6 @@ function makePipeline(cv, full) {
       mat = null;
     },
   };
-}
-
-// Zonder vragen: blad zoeken, rechttrekken, verbeteren.
-// → {blob, original, settings, found} (found = blad gevonden).
-export async function autoScan(source) {
-  const { full, small } = await openPhoto(source);
-  let cv = null;
-  try {
-    cv = await loadCv();
-  } catch (e) {
-    console.error(e);
-  }
-  try {
-    if (!cv) {
-      // Zonder scanner: de foto zoals hij is (verkleind).
-      return { blob: await toBlob(full, 0.9), original: null, settings: null, found: false, noScanner: true };
-    }
-    let quad = null;
-    try {
-      quad = detectQuad(cv, small);
-    } catch (e) {
-      console.error(e);
-    }
-    const settings = { quad: quad || fullQuad(), mode: savedMode(), rot: 0, curve: savedCurve() };
-    const pipe = makePipeline(cv, full);
-    const out = document.createElement("canvas");
-    try {
-      pipe.render(settings, out);
-    } finally {
-      pipe.free();
-    }
-    const blob = await toBlob(out, quality(settings));
-    out.width = out.height = 0;
-    // Verkleinde originele foto bewaren, om later opnieuw te kunnen bijsnijden.
-    const original = await toBlob(full, 0.88);
-    return { blob, original, settings, found: !!quad };
-  } finally {
-    full.width = full.height = small.width = small.height = 0;
-  }
 }
 
 // Inzoomen in het resultaat: knijpen, twee vingers of één vinger schuiven, dubbeltik.
@@ -250,9 +210,10 @@ function zoomable(stage, el) {
   };
 }
 
-// Aanpassen. source = originele foto, prev = instellingen.
-// → {blob, original, settings} (aangepast), {remove: true}, {retake: true} of null (niets veranderd).
-export function editScan(source, prev = null, { title: titleText = "Aanpassen" } = {}) {
+// source = foto, prev = instellingen (bij aanpassen).
+// → {blob, original, settings}, {remove: true}, {retake: true}, of null
+//   (review: weggegooid; aanpassen: niets veranderd).
+export function editScan(source, prev = null, { title: titleText = "Aanpassen", review = false, retake = true } = {}) {
   return new Promise(async (resolve) => {
     let cv = null;
     let full = null;
@@ -260,19 +221,22 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
     let pipe = null;
     const s = {
       quad: prev && prev.quad ? prev.quad.map((p) => ({ ...p })) : null,
-      mode: (prev && prev.mode) || savedMode(),
       rot: (prev && prev.rot) || 0,
-      curve: prev && "curve" in prev ? !!prev.curve : savedCurve(),
+      ...clean({ ...prefs(), ...(prev || {}) }),
     };
     const startKey = prev && prev.quad ? JSON.stringify(s) : "";
     let auto = null; // automatisch gevonden hoeken
     let step = 2;
+    let fromResult = false; // hoeken geopend vanuit het resultaat: terug = terug naar resultaat
     let done = false;
 
     // ---------- opbouw ----------
     const title = h("div", { class: "se-title" }, titleText);
-    const closeBtn = h("button", { type: "button", class: "se-x", "aria-label": "Terug zonder wijzigen", html: icon("back") });
+    const closeBtn = review
+      ? h("button", { type: "button", class: "se-x", "aria-label": "Foto weggooien", html: icon("trash") })
+      : h("button", { type: "button", class: "se-x", "aria-label": "Terug zonder wijzigen", html: icon("back") });
     const delBtn = h("button", { type: "button", class: "se-x", "aria-label": "Pagina verwijderen", html: icon("trash") });
+    if (review) delBtn.style.display = "none";
     const busy = h("div", { class: "se-busy" }, h("i"), h("span", {}, "Scanner laden…"));
     const view = h("canvas", { class: "se-img" });
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -301,14 +265,26 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
     const rotL = h("button", { type: "button", class: "se-rot", "aria-label": "Linksom draaien", html: icon("turnL") });
     const rotR = h("button", { type: "button", class: "se-rot", "aria-label": "Rechtsom draaien", html: icon("turnR") });
     const modesRow = h("div", { class: "se-modes" }, rotL, modeBtns, rotR);
-    const curveBtn = h("button", { type: "button", class: "se-chip", "aria-pressed": "false" });
-    const curveRow = h("div", { class: "se-extra" }, curveBtn);
+    // Schuifje: links schoner (minder spikkels, lichter), rechts meer details (donkerder).
+    const slider = h("input", { type: "range", class: "se-range", min: -5, max: 5, step: 1, "aria-label": "Schoner of meer details" });
+    const levelRow = h(
+      "div",
+      { class: "se-level" },
+      h("span", {}, "Schoner"),
+      slider,
+      h("span", {}, "Meer details")
+    );
+    const chip = (label) => h("button", { type: "button", class: "se-chip", "aria-pressed": "false", html: `<i></i><span>${label}</span>` });
+    const speckBtn = chip("Spikkels weg");
+    const curveBtn = chip("Krom blad");
+    const curveRow = h("div", { class: "se-extra" }, speckBtn, curveBtn);
     const cornersBtn = h("button", { type: "button", class: "btn se-btn", html: icon("crop") + "<span>Hoeken</span>" });
     const retakeBtn = h("button", { type: "button", class: "btn se-btn", html: icon("camera") + "<span>Opnieuw</span>" });
-    const okBtn = h("button", { type: "button", class: "btn primary se-btn" }, "Klaar");
+    if (!retake) retakeBtn.style.display = "none";
+    const okBtn = h("button", { type: "button", class: "btn primary se-btn" }, review ? "Versturen" : "Klaar");
     const bar2 = h("div", { class: "se-bar" }, cornersBtn, retakeBtn, okBtn);
 
-    const root = h("div", { class: "se" }, h("div", { class: "se-top" }, closeBtn, title, delBtn), stage, modesRow, curveRow, bar1, bar2);
+    const root = h("div", { class: "se" }, h("div", { class: "se-top" }, closeBtn, title, delBtn), stage, modesRow, levelRow, curveRow, bar1, bar2);
     document.body.append(root);
     document.body.classList.add("cam-open");
     const zoom = zoomable(stage, result);
@@ -427,26 +403,51 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
     });
 
     // ---------- resultaat ----------
-    function updateCurveBtn() {
-      curveBtn.setAttribute("aria-pressed", s.curve ? "true" : "false");
-      curveBtn.classList.toggle("on", s.curve);
-      curveBtn.innerHTML = `<i></i><span>Krom blad rechttrekken</span>`;
+    function updateControls() {
+      modeBtns.forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
+      slider.value = s.level;
+      for (const [btn, on] of [
+        [speckBtn, s.speck],
+        [curveBtn, s.curve],
+      ]) {
+        btn.classList.toggle("on", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      }
+      speckBtn.hidden = s.mode !== "bw"; // grijs heeft geen losse spikkels
     }
 
-    async function renderResult() {
-      setBusy(s.curve ? "Rechttrekken…" : "Verbeteren…");
-      modeBtns.forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
-      updateCurveBtn();
-      await tick();
+    // quiet: zonder wachtscherm en zonder zoom te resetten (schuifje).
+    async function renderResult(quiet = false) {
+      updateControls();
+      if (!quiet) {
+        setBusy(s.curve ? "Rechttrekken…" : "Verbeteren…");
+        await tick();
+      }
       try {
+        const w = result.width;
+        const hh = result.height;
         pipe.render(s, result);
-        zoom.reset();
-        if (s.curve && pipe.curveFailed) toast("Geen kromming gevonden (te weinig notenbalken of al recht)", 3000);
+        if (!quiet || result.width !== w || result.height !== hh) zoom.reset();
+        if (!quiet && s.curve && pipe.curveFailed) toast("Geen kromming gevonden (te weinig notenbalken of al recht)", 3000);
       } catch (e) {
         console.error(e);
-        toast("Verbeteren lukt niet, probeer Origineel", 3000);
+        toast("Verbeteren lukt niet", 3000);
       }
-      setBusy("");
+      if (!quiet) setBusy("");
+    }
+
+    // Schuifje: meteen zien, maar niet vaker rekenen dan de telefoon aankan.
+    let sliding = false;
+    let again = false;
+    async function renderSoon() {
+      if (sliding) return (again = true);
+      sliding = true;
+      do {
+        again = false;
+        await tick();
+        await renderResult(true);
+      } while (again && !done);
+      sliding = false;
     }
 
     function setStep(n) {
@@ -458,15 +459,20 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
       bar1.hidden = n !== 1;
       bar2.hidden = n !== 2;
       modesRow.hidden = n !== 2;
+      levelRow.hidden = n !== 2;
       curveRow.hidden = n !== 2;
       delBtn.style.visibility = n === 2 ? "" : "hidden";
+      if (review) closeBtn.style.visibility = n === 2 || !fromResult ? "" : "hidden";
       if (n === 1) {
         layout();
         drawQuad();
       } else renderResult();
     }
 
-    cornersBtn.addEventListener("click", () => setStep(1));
+    cornersBtn.addEventListener("click", () => {
+      fromResult = true;
+      setStep(1);
+    });
     cornersDone.addEventListener("click", () => setStep(2));
     modeBtns.forEach((b) =>
       b.addEventListener("click", () => {
@@ -475,6 +481,18 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
         renderResult();
       })
     );
+    slider.addEventListener("input", () => {
+      s.level = +slider.value;
+      renderSoon();
+    });
+    slider.addEventListener("change", () => savePrefs(s));
+    // Het schuifje mag het resultaat niet laten schuiven of zoomen.
+    levelRow.addEventListener("pointerdown", (e) => e.stopPropagation());
+    speckBtn.addEventListener("click", () => {
+      s.speck = !s.speck;
+      savePrefs(s);
+      renderResult(true);
+    });
     curveBtn.addEventListener("click", () => {
       s.curve = !s.curve;
       savePrefs(s);
@@ -489,7 +507,7 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
       renderResult();
     });
     okBtn.addEventListener("click", async () => {
-      if (startKey && JSON.stringify(s) === startKey) return finish(null); // niets veranderd
+      if (!review && startKey && JSON.stringify(s) === startKey) return finish(null); // niets veranderd
       setBusy("Opslaan…");
       await tick();
       const blob = await toBlob(result, quality(s));
@@ -497,16 +515,17 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
         setBusy("");
         return toast("Opslaan mislukt", 3000);
       }
-      const original = source instanceof Blob ? source : await toBlob(full, 0.88);
+      // Verkleinde foto bewaren, om later opnieuw te kunnen bijsnijden.
+      const original = !review && source instanceof Blob ? source : await toBlob(full, 0.88);
       finish({ blob, original, settings: { ...s, quad: s.quad.map((p) => ({ ...p })) } });
     });
     retakeBtn.addEventListener("click", () => finish({ retake: true }));
     delBtn.addEventListener("click", () => finish({ remove: true }));
-    closeBtn.addEventListener("click", () => (step === 1 && startKey ? setStep(2) : finish(null)));
+    closeBtn.addEventListener("click", () => (step === 1 && fromResult ? setStep(2) : finish(null)));
     window.addEventListener("resize", layout);
 
     // ---------- starten ----------
-    for (const el of [frame, result, hint, bar1, bar2, modesRow, curveRow]) el.hidden = true;
+    for (const el of [frame, result, hint, bar1, bar2, modesRow, levelRow, curveRow]) el.hidden = true;
     setBusy("Foto openen…");
     try {
       ({ full, small } = await openPhoto(source));
@@ -524,6 +543,11 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
       cv = await loadCv();
     } catch (e) {
       console.error(e);
+      if (review) {
+        // Zonder scanner: de foto zoals hij is (verkleind) versturen.
+        toast("Scanner niet geladen (internet?). Foto gaat zonder verbetering.", 4000);
+        return finish({ blob: await toBlob(full, 0.9), original: null, settings: null });
+      }
       toast("Scanner niet geladen (internet?)", 3500);
       return finish(null);
     }
@@ -539,7 +563,9 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen" }
     if (!s.quad) s.quad = auto ? auto.map((p) => ({ ...p })) : fullQuad();
     setBusy("");
     // Geen blad gevonden: meteen naar de hoeken.
-    setStep(prev && prev.quad && prev.found !== false ? 2 : 1);
-    if (step === 1 && !auto) toast("Sleep de hoeken naar de hoeken van het blad", 3000);
+    const ok = review ? !!auto : prev && prev.quad && prev.found !== false;
+    fromResult = false;
+    setStep(ok ? 2 : 1);
+    if (step === 1 && !auto) toast("Blad niet gevonden. Sleep de hoeken naar de hoeken van het blad.", 3500);
   });
 }

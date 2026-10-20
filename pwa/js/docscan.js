@@ -1,5 +1,5 @@
-// Documentscanner met OpenCV.js: blad zoeken (4 hoeken), rechttrekken en
-// verbeteren (witte achtergrond, contrast, scherper, zwart-wit).
+// Documentscanner met OpenCV.js: blad zoeken (4 hoeken), rechttrekken, krom blad
+// rechttrekken en verbeteren (witte achtergrond, contrast, scherper, zwart-wit).
 // Alleen op de telefoon (scan.html) in gebruik. OpenCV (± 11 MB, 3,5 MB over de lijn)
 // wordt één keer geladen en daarna uit de cache van de telefoon gehaald.
 
@@ -447,46 +447,53 @@ function sharpen(cv, m, amount, keep) {
   cv.addWeighted(m, 1 + amount, blur, -amount, 0, m);
 }
 
-// mode: "bw" (zwart-wit), "gray", "color", "orig". Geeft een nieuwe Mat (zelf .delete()!).
-export function enhance(cv, rgba, mode) {
-  if (mode === "orig") return rgba.clone();
+// Losse spikkels weghalen: zwarte vlekjes die in beide richtingen kleiner zijn dan
+// max px worden wit. Noten, punten (staccato) en lijnen zijn groter en blijven staan.
+function despeckle(cv, bw, max, keep) {
+  const inv = keep(new cv.Mat());
+  cv.bitwise_not(bw, inv);
+  const contours = keep(new cv.MatVector());
+  const hier = keep(new cv.Mat());
+  cv.findContours(inv, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+  const white = new cv.Scalar(255);
+  for (let i = 0; i < contours.size(); i++) {
+    const c = contours.get(i);
+    const r = cv.boundingRect(c);
+    c.delete();
+    if (r.width <= max && r.height <= max) cv.rectangle(bw, new cv.Point(r.x, r.y), new cv.Point(r.x + r.width - 1, r.y + r.height - 1), white, -1);
+  }
+}
+
+// mode: "bw" (zwart-wit) of "gray". level -5..5: lager = schoner (lichter, minder
+// spikkels), hoger = meer details (donkerder). speck: losse spikkels weghalen.
+// Geeft een nieuwe Mat (zelf .delete()!).
+export function enhance(cv, rgba, mode, { level = 0, speck = true } = {}) {
+  const v = Math.max(-5, Math.min(5, +level || 0));
   return using((keep) => {
-    if (mode === "color") {
-      const rgb = keep(new cv.Mat());
-      cv.cvtColor(rgba, rgb, cv.COLOR_RGBA2RGB);
-      const chans = keep(new cv.MatVector());
-      cv.split(rgb, chans);
-      const outs = new cv.MatVector();
-      keep(outs);
-      for (let i = 0; i < 3; i++) {
-        const c = keep(chans.get(i));
-        const f = flatten(cv, c, keep);
-        f.convertTo(f, -1, 1.15, -0.15 * 255);
-        outs.push_back(f);
-      }
-      const merged = keep(new cv.Mat());
-      cv.merge(outs, merged);
-      sharpen(cv, merged, 0.5, keep);
-      return merged.clone();
-    }
     const gray = keep(new cv.Mat());
     cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
     const flat = flatten(cv, gray, keep);
     if (mode === "gray") {
-      flat.convertTo(flat, -1, 1.3, -0.3 * 255);
+      const a = 1.3 + 0.08 * v;
+      flat.convertTo(flat, -1, a, -(a - 1) * 255 - 5 * v);
       sharpen(cv, flat, 0.6, keep);
       return flat.clone();
     }
     // Zwart-wit: lokaal drempelen (dunne notenbalken blijven heel) en
-    // overal waar het papier duidelijk licht is gewoon wit (geen spikkels).
+    // overal waar het papier duidelijk licht is gewoon wit. Naar rechts (meer
+    // details) voorzichtiger dan naar links, anders wordt papierruis zwart.
+    const C = v < 0 ? 9 - 1.2 * v : 9 - 0.6 * v;
+    const lightAt = v < 0 ? 232 + 2.5 * v : 232 + 1.2 * v;
+    const speckK = v < 0 ? 1 - 0.1 * v : 1;
     let block = Math.round(Math.min(flat.cols, flat.rows) / 45);
     block = Math.max(15, block % 2 ? block : block + 1);
     const ad = keep(new cv.Mat());
-    cv.adaptiveThreshold(flat, ad, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, block, 9);
+    cv.adaptiveThreshold(flat, ad, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, block, C);
     const light = keep(new cv.Mat());
-    cv.threshold(flat, light, 232, 255, cv.THRESH_BINARY);
+    cv.threshold(flat, light, lightAt, 255, cv.THRESH_BINARY);
     const out = keep(new cv.Mat());
     cv.bitwise_or(ad, light, out);
+    if (speck) despeckle(cv, out, Math.max(2, Math.round((Math.min(out.cols, out.rows) / 650) * speckK)), keep);
     return out.clone();
   });
 }

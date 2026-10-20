@@ -102,7 +102,7 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
     addBtn.disabled = busy;
     addBtn.textContent = purpose === "append" ? `Toevoegen aan nummer (${pages.length})` : `Toevoegen (${pages.length})`;
     if (!pages.length) {
-      fill(grid, conn && conn.open ? h("div", { class: "pc-empty" }, icon("camera"), h("span", {}, "Maak een foto met de telefoon")) : null);
+      fill(grid, conn && conn.open ? h("div", { class: "pc-empty" }, h("span", { class: "pc-empty-ic", html: icon("camera") }), h("span", {}, "Maak een foto met de telefoon")) : null);
       return;
     }
     fill(

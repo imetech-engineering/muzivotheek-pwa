@@ -9,6 +9,7 @@
 
 import { h } from "./ui.js";
 import { icon } from "./icons.js";
+import { loadCv, detectQuad } from "./docscan.js";
 
 export const cameraSupported = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 
@@ -23,6 +24,9 @@ export function openCamera(onShot, { counter = () => "", single = false, thumb =
     let busy = false;
 
     const video = h("video", { class: "cam-video", playsinline: true, muted: true, autoplay: true });
+    // Live kader: het gevonden blad in het camerabeeld.
+    const overlay = h("canvas", { class: "cam-quad", "aria-hidden": "true" });
+    const view = h("div", { class: "cam-view" }, video, overlay);
     const msg = h("div", { class: "cam-msg" }, "Camera starten…");
     const count = h("div", { class: "cam-count" });
     const flashBtn = h("button", { type: "button", class: "cam-side", "aria-label": "Lamp", html: ICON_FLASH, hidden: true });
@@ -34,7 +38,7 @@ export function openCamera(onShot, { counter = () => "", single = false, thumb =
     const root = h(
       "div",
       { class: "cam" },
-      video,
+      view,
       flash,
       msg,
       
@@ -60,6 +64,7 @@ export function openCamera(onShot, { counter = () => "", single = false, thumb =
 
     function close() {
       stop();
+      clearTimeout(liveTimer);
       root.remove();
       document.body.classList.remove("cam-open");
       document.removeEventListener("visibilitychange", onVis);
@@ -124,8 +129,8 @@ export function openCamera(onShot, { counter = () => "", single = false, thumb =
         const blob = await grabFrame();
         // Camera even uit tijdens het verwerken: scheelt veel geheugen op de telefoon.
         stop();
-        if (blob) await onShot(blob);
-        if (single && blob) return close();
+        const r = blob ? await onShot(blob) : null;
+        if (single && blob && r !== "again") return close();
       } catch (e) {
         console.error(e);
       } finally {
@@ -148,6 +153,76 @@ export function openCamera(onShot, { counter = () => "", single = false, thumb =
     });
 
     closeBtn.addEventListener("click", close);
+
+    // ---------- live kader ----------
+    let cv = null;
+    loadCv()
+      .then((c) => (cv = c))
+      .catch(() => {});
+    const probe = document.createElement("canvas");
+    let quad = null;
+    let misses = 0;
+    let liveTimer = 0;
+
+    function drawOverlay() {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const ew = overlay.clientWidth;
+      const eh = overlay.clientHeight;
+      if (overlay.width !== Math.round(ew * dpr) || overlay.height !== Math.round(eh * dpr)) {
+        overlay.width = Math.round(ew * dpr);
+        overlay.height = Math.round(eh * dpr);
+      }
+      const ctx = overlay.getContext("2d");
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!quad || !vw || !vh) return;
+      // Video staat "contain" in zijn vak: zelfde omrekening.
+      const k = Math.min(ew / vw, eh / vh);
+      const ox = (ew - vw * k) / 2;
+      const oy = (eh - vh * k) / 2;
+      const pts = quad.map((p) => [(ox + p.x * vw * k) * dpr, (oy + p.y * vh * k) * dpr]);
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.fillStyle = "rgba(255, 61, 139, 0.18)";
+      ctx.fill();
+      ctx.lineWidth = 3 * dpr;
+      ctx.strokeStyle = "#ff3d8b";
+      ctx.lineJoin = "round";
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      for (const [x, y] of pts) {
+        ctx.beginPath();
+        ctx.arc(x, y, 6 * dpr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    function liveTick() {
+      if (!root.isConnected) return;
+      if (cv && stream && !busy && video.videoWidth && document.visibilityState === "visible") {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const k = Math.min(1, 360 / Math.max(vw, vh));
+        probe.width = Math.round(vw * k);
+        probe.height = Math.round(vh * k);
+        probe.getContext("2d", { willReadFrequently: true }).drawImage(video, 0, 0, probe.width, probe.height);
+        let q = null;
+        try {
+          q = detectQuad(cv, probe);
+        } catch (e) {}
+        if (q) {
+          misses = 0;
+          // Rustig meebewegen i.p.v. springen.
+          quad = quad ? quad.map((p, i) => ({ x: p.x + (q[i].x - p.x) * 0.6, y: p.y + (q[i].y - p.y) * 0.6 })) : q;
+        } else if (++misses > 2) quad = null;
+      } else if (!stream) quad = null;
+      drawOverlay();
+      liveTimer = setTimeout(liveTick, 250);
+    }
+    liveTick();
 
     thumbBtn.addEventListener("click", async () => {
       if (busy || !onThumb) return;

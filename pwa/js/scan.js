@@ -1,7 +1,7 @@
 // Telefoon-kant van "Scannen met telefoon" (scan.html, geopend via de QR-code op de tablet).
-// Foto maken → blad automatisch zoeken, rechttrekken en verbeteren → meteen naar de
-// tablet. Tik op een pagina om te bekijken (inzoomen) en aan te passen, opnieuw te
-// maken of te verwijderen. De tablet bewaart ze; deze pagina toont wat de tablet
+// Foto maken → blad automatisch zoeken, rechttrekken en verbeteren → resultaat
+// controleren (Versturen, Opnieuw of weggooien) → naar de tablet. Tik op een pagina
+// om hem later te bekijken (inzoomen) en aan te passen, opnieuw te maken of te verwijderen. De tablet bewaart ze; deze pagina toont wat de tablet
 // heeft (zie phonelink.js).
 
 import { $, h, fill, toast, menu, promptDlg } from "./ui.js";
@@ -10,7 +10,7 @@ import { isImageFile } from "./imgpdf.js";
 import { applyTheme } from "./settings.js";
 import { PREFIX, loadPeer, randomId, peerOptions, peerErrorText } from "./phonelink.js";
 import { openCamera, cameraSupported } from "./scancam.js";
-import { autoScan, editScan, preloadScanner } from "./scanedit.js";
+import { editScan, preloadScanner } from "./scanedit.js";
 
 applyTheme();
 
@@ -60,7 +60,7 @@ function render() {
   els.done.disabled = !on || !st.pages.length || st.waitingDone;
   els.done.textContent = st.purpose === "append" ? `Klaar, toevoegen aan nummer (${st.pages.length})` : `Klaar, toevoegen op tablet (${st.pages.length})`;
   if (!total) {
-    fill(els.pages, on ? h("div", { class: "pc-empty" }, icon("camera"), h("span", {}, "Nog geen foto's")) : null);
+    fill(els.pages, on ? h("div", { class: "pc-empty" }, h("span", { class: "pc-empty-ic", html: icon("camera") }), h("span", {}, "Nog geen foto's")) : null);
     return;
   }
   const tiles = st.pages.map((p, i) =>
@@ -142,34 +142,35 @@ function setLast(id, blob) {
 
 // Opnieuw maken: nieuwe foto op dezelfde plek.
 async function retake(id) {
+  const nr = st.pages.findIndex((p) => p.id === id) + 1;
   const use = async (file) => {
-    const res = await scanOne(file);
+    const res = await review(file, nr ? `Pagina ${nr} opnieuw` : "Opnieuw", true);
+    if (res && res.retake) return "again"; // camera blijft open voor nog een poging
     if (res) await replaceWith(id, res);
   };
   if (!cameraSupported()) return pick(true, (files) => files[0] && use(files[0]));
   await openCamera((blob) => use(new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })), { single: true });
 }
 
-// Eén foto verwerken, met wachtrij-melding.
-async function scanOne(file) {
-  progress("Blad zoeken en verbeteren…");
+// Nieuwe foto: automatisch bijgesneden resultaat laten controleren.
+async function review(file, title, canRetake) {
   try {
-    return await autoScan(file);
+    return await editScan(file, null, { review: true, title, retake: canRetake });
   } catch (e) {
     console.error(e);
     toast(`Foto "${file.name}" lukt niet`, 3000);
     return null;
-  } finally {
-    progress("");
   }
 }
 
-async function addFiles(files) {
+// fromCamera: Opnieuw = gewoon terug naar de camera.
+async function addFiles(files, fromCamera = false) {
   files = files.filter(isImageFile);
   if (!files.length) return;
   for (const f of files) {
-    const res = await scanOne(f);
-    if (!res) continue;
+    const nr = st.pages.length + st.pending.length + 1;
+    const res = await review(f, `Pagina ${nr}`, fromCamera);
+    if (!res || res.retake) continue;
     const n = ++st.counter;
     const stamp = new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, ".");
     const item = {
@@ -180,10 +181,8 @@ async function addFiles(files) {
       url: URL.createObjectURL(res.blob),
     };
     st.pending.push(item);
-    if (res.original) st.originals.set(item.id, { original: res.original, settings: res.settings, found: res.found });
+    if (res.original) st.originals.set(item.id, { original: res.original, settings: res.settings, found: true });
     setLast(item.id, res.blob);
-    if (res.noScanner) toast("Scanner niet geladen (internet?). Foto gaat zonder verbetering.", 3500);
-    else if (!res.found) toast("Blad niet gevonden: hele foto gebruikt. Tik op de pagina om de hoeken te zetten.", 3500);
     render();
     flush();
   }
@@ -204,7 +203,7 @@ function pick(capture, onFiles = addFiles) {
 els.shoot.addEventListener("click", () => {
   // Camera in de pagina: Chrome blijft actief. Geen camera-toegang? Dan de camera-app.
   if (!cameraSupported()) return pick(true);
-  openCamera((blob) => addFiles([new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })]), {
+  openCamera((blob) => addFiles([new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })], true), {
     counter: () => (st.pages.length ? `${st.pages.length} op de tablet` : ""),
     thumb: () => st.last,
     onThumb: () => st.last && reedit(st.last.id),
