@@ -79,7 +79,8 @@ toont wat de tablet heeft, dus opnieuw verbinden na de camera-app gaat vanzelf g
 - **Scannen** (`js/docscan.js`, `js/scanedit.js`, OpenCV.js 4.12 in `vendor/opencv`, Apache-2.0): in de
   camera toont een roze kader live welk blad gevonden wordt. Na elke foto: automatisch bijsnijden,
   rechttrekken, papier wit maken (delen door de geschatte achtergrond) en verbeteren, en dan het resultaat
-  **controleren** (knijpen/dubbeltik = inzoomen) met *Versturen*, *Opnieuw* of weggooien. Aanpassen kan
+  controleren in het gewone aanpasscherm (knijpen/dubbeltik = inzoomen; *Klaar* of terug = naar de tablet,
+  prullenbak = weggooien, *Opnieuw* = nieuwe foto). Aanpassen kan
   daar en later (tik op een pagina): hoeken (met vergrootglas), draaien, filter *Zwart-wit* of *Grijs*,
   schuifje *Schoner ⟷ Meer details*, *Spikkels weg* (losse vlekjes kleiner dan ± 3 px worden wit; noten
   en staccato-punten blijven) en *Krom blad*. De laatste keuzes gelden voor de volgende foto's. Laatste

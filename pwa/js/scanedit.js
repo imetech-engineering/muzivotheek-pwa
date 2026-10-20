@@ -1,6 +1,6 @@
 // Scannen op de telefoon (scan.html), zoals een scan-app. editScan:
 //   review: na een nieuwe foto. Blad wordt zelf gezocht, rechtgetrokken en verbeterd;
-//     je ziet meteen het resultaat en kiest Versturen, Opnieuw of weggooien.
+//     zelfde scherm als aanpassen. Klaar of terug = gebruiken, prullenbak = weggooien.
 //   anders: een verstuurde pagina achteraf aanpassen.
 // In beide: inzoomen, hoeken verslepen (met vergrootglas), draaien, filter kiezen,
 // krom blad rechttrekken. Instellingen: {quad, mode, rot, curve}.
@@ -232,11 +232,8 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
 
     // ---------- opbouw ----------
     const title = h("div", { class: "se-title" }, titleText);
-    const closeBtn = review
-      ? h("button", { type: "button", class: "se-x", "aria-label": "Foto weggooien", html: icon("trash") })
-      : h("button", { type: "button", class: "se-x", "aria-label": "Terug zonder wijzigen", html: icon("back") });
+    const closeBtn = h("button", { type: "button", class: "se-x", "aria-label": review ? "Terug" : "Terug zonder wijzigen", html: icon("back") });
     const delBtn = h("button", { type: "button", class: "se-x", "aria-label": "Pagina verwijderen", html: icon("trash") });
-    if (review) delBtn.style.display = "none";
     const busy = h("div", { class: "se-busy" }, h("i"), h("span", {}, "Scanner laden…"));
     const view = h("canvas", { class: "se-img" });
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -281,7 +278,7 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
     const cornersBtn = h("button", { type: "button", class: "btn se-btn", html: icon("crop") + "<span>Hoeken</span>" });
     const retakeBtn = h("button", { type: "button", class: "btn se-btn", html: icon("camera") + "<span>Opnieuw</span>" });
     if (!retake) retakeBtn.style.display = "none";
-    const okBtn = h("button", { type: "button", class: "btn primary se-btn" }, review ? "Versturen" : "Klaar");
+    const okBtn = h("button", { type: "button", class: "btn primary se-btn" }, "Klaar");
     const bar2 = h("div", { class: "se-bar" }, cornersBtn, retakeBtn, okBtn);
 
     const root = h("div", { class: "se" }, h("div", { class: "se-top" }, closeBtn, title, delBtn), stage, modesRow, levelRow, curveRow, bar1, bar2);
@@ -462,7 +459,6 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
       levelRow.hidden = n !== 2;
       curveRow.hidden = n !== 2;
       delBtn.style.visibility = n === 2 ? "" : "hidden";
-      if (review) closeBtn.style.visibility = n === 2 || !fromResult ? "" : "hidden";
       if (n === 1) {
         layout();
         drawQuad();
@@ -506,7 +502,7 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
       s.rot = (s.rot + 90) % 360;
       renderResult();
     });
-    okBtn.addEventListener("click", async () => {
+    async function save() {
       if (!review && startKey && JSON.stringify(s) === startKey) return finish(null); // niets veranderd
       setBusy("Opslaan…");
       await tick();
@@ -518,10 +514,12 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
       // Verkleinde foto bewaren, om later opnieuw te kunnen bijsnijden.
       const original = !review && source instanceof Blob ? source : await toBlob(full, 0.88);
       finish({ blob, original, settings: { ...s, quad: s.quad.map((p) => ({ ...p })) } });
-    });
+    }
+    okBtn.addEventListener("click", save);
     retakeBtn.addEventListener("click", () => finish({ retake: true }));
     delBtn.addEventListener("click", () => finish({ remove: true }));
-    closeBtn.addEventListener("click", () => (step === 1 && fromResult ? setStep(2) : finish(null)));
+    // Terug: bij een nieuwe foto gewoon gebruiken zoals hij is (net als Klaar).
+    closeBtn.addEventListener("click", () => (step === 1 && fromResult ? setStep(2) : review ? (step === 2 ? save() : setStep(2)) : finish(null)));
     window.addEventListener("resize", layout);
 
     // ---------- starten ----------

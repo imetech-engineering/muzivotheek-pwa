@@ -1,6 +1,6 @@
 // Telefoon-kant van "Scannen met telefoon" (scan.html, geopend via de QR-code op de tablet).
-// Foto maken → blad automatisch zoeken, rechttrekken en verbeteren → resultaat
-// controleren (Versturen, Opnieuw of weggooien) → naar de tablet. Tik op een pagina
+// Foto maken → blad automatisch zoeken, rechttrekken en verbeteren → controleren in
+// het gewone aanpasscherm (Klaar = naar de tablet, prullenbak = weg) → naar de tablet. Tik op een pagina
 // om hem later te bekijken (inzoomen) en aan te passen, opnieuw te maken of te verwijderen. De tablet bewaart ze; deze pagina toont wat de tablet
 // heeft (zie phonelink.js).
 
@@ -146,7 +146,7 @@ async function retake(id) {
   const use = async (file) => {
     const res = await review(file, nr ? `Pagina ${nr} opnieuw` : "Opnieuw", true);
     if (res && res.retake) return "again"; // camera blijft open voor nog een poging
-    if (res) await replaceWith(id, res);
+    if (res && !res.remove) await replaceWith(id, res);
   };
   if (!cameraSupported()) return pick(true, (files) => files[0] && use(files[0]));
   await openCamera((blob) => use(new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })), { single: true });
@@ -170,7 +170,7 @@ async function addFiles(files, fromCamera = false) {
   for (const f of files) {
     const nr = st.pages.length + st.pending.length + 1;
     const res = await review(f, `Pagina ${nr}`, fromCamera);
-    if (!res || res.retake) continue;
+    if (!res || res.retake || res.remove) continue; // opnieuw of weggegooid
     const n = ++st.counter;
     const stamp = new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, ".");
     const item = {
