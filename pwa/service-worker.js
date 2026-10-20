@@ -52,13 +52,24 @@ const ASSETS = [
   "./icons/apple-touch-icon.png",
 ];
 
+const isScanUrl = (u) => new URL(u).pathname.endsWith("/scan.html");
+
+// Alleen scanpagina's open (telefoon die de QR-code scande)? Dan meteen overnemen.
+async function onlyScanPages() {
+  const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  return list.length > 0 && list.every((c) => isScanUrl(c.url));
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
       .then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: "reload" }))))
+      .then(onlyScanPages)
+      .then((only) => only && self.skipWaiting())
   );
-  // Niet meteen overnemen: de app vraagt eerst of je wilt bijwerken.
+  // Anders niet meteen overnemen: de app vraagt eerst of je wilt bijwerken
+  // (nooit midden in een stuk).
 });
 
 self.addEventListener("message", (event) => {
@@ -71,8 +82,32 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k.startsWith("muzivotheek-") && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+      .then(async () => {
+        // Open scanpagina's meteen de nieuwe versie laten zien.
+        const list = await self.clients.matchAll({ type: "window" });
+        for (const c of list) if (isScanUrl(c.url) && c.navigate) c.navigate(c.url).catch(() => {});
+      })
   );
 });
+
+// Scanpagina (telefoon): altijd de nieuwste versie, de cache alleen zonder internet.
+// Die pagina wordt vaak maar af en toe geopend (QR-code), en heeft toch internet
+// nodig om de tablet te vinden.
+async function fromScanPage(event) {
+  if (event.request.mode === "navigate") return isScanUrl(event.request.url);
+  if (!event.clientId) return false;
+  const c = await self.clients.get(event.clientId);
+  return !!(c && isScanUrl(c.url));
+}
+
+async function networkFirst(request) {
+  try {
+    const res = await fetch(request, { cache: "no-cache" });
+    if (res.ok) return res;
+  } catch (e) {}
+  const hit = await caches.match(request, { ignoreSearch: true });
+  return hit || fetch(request);
+}
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
@@ -121,7 +156,16 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || url.origin !== location.origin) return;
 
   // Cache eerst (snel en offline); standaardlettertypes van pdf.js worden bij gebruik bewaard.
+  // Uitzondering: alles voor de scanpagina komt eerst van internet.
   event.respondWith(
+    fromScanPage(event).then((scan) =>
+      scan && !url.pathname.includes("/vendor/opencv/") ? networkFirst(event.request) : cacheFirst(event, url)
+    )
+  );
+});
+
+function cacheFirst(event, url) {
+  return (
     caches.match(event.request, { ignoreSearch: url.pathname.endsWith("/") || url.pathname.endsWith("index.html") }).then(
       (hit) =>
         hit ||
@@ -134,4 +178,4 @@ self.addEventListener("fetch", (event) => {
         })
     )
   );
-});
+}

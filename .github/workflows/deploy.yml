@@ -28,7 +28,7 @@ jobs:
       - name: Versie stempelen
         run: |
           BUILD="$(date -u +%Y%m%d)-${GITHUB_SHA::7}"
-          sed -i "s/__BUILD__/${BUILD}/g" pwa/service-worker.js pwa/js/update.js
+          sed -i "s/__BUILD__/${BUILD}/g" pwa/service-worker.js pwa/js/update.js pwa/js/phonelink.js
           grep -q "$BUILD" pwa/service-worker.js
       - uses: actions/upload-pages-artifact@v3
         with:

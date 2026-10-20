@@ -8,11 +8,34 @@ import { $, h, fill, toast, menu, promptDlg } from "./ui.js";
 import { icon } from "./icons.js";
 import { isImageFile } from "./imgpdf.js";
 import { applyTheme } from "./settings.js";
-import { PREFIX, loadPeer, randomId, peerOptions, peerErrorText } from "./phonelink.js";
+import { PREFIX, BUILD, loadPeer, randomId, peerOptions, peerErrorText } from "./phonelink.js";
 import { openCamera, cameraSupported } from "./scancam.js";
 import { editScan, preloadScanner } from "./scanedit.js";
 
 applyTheme();
+
+// Oudere versie dan de tablet (bewaard in de browser)? Eén keer vers ophalen.
+(function freshness() {
+  const want = new URLSearchParams(location.search).get("v");
+  if (!want || want === BUILD || BUILD.startsWith("__")) return;
+  const key = "muzi-scan-refresh";
+  try {
+    if (sessionStorage.getItem(key) === want) return; // al geprobeerd: niet blijven herladen
+    sessionStorage.setItem(key, want);
+  } catch (e) {
+    return;
+  }
+  const reload = () => location.reload();
+  if (!navigator.serviceWorker) return reload();
+  navigator.serviceWorker.getRegistration().then(async (r) => {
+    if (r) await r.update().catch(() => {});
+    const w = r && (r.waiting || r.installing);
+    if (!w) return reload();
+    navigator.serviceWorker.addEventListener("controllerchange", reload);
+    w.postMessage({ type: "SKIP_WAITING" });
+    setTimeout(reload, 4000);
+  }, reload);
+})();
 
 const target = decodeURIComponent(location.hash.slice(1)).trim();
 const els = {

@@ -13,6 +13,7 @@
 //                      {t:"remove", id} | {t:"undo"} | {t:"done", mode, name}
 
 export const PREFIX = "muzi-";
+export const BUILD = "__BUILD__"; // wordt bij publiceren vervangen (zie deploy.yml)
 
 let peerPromise = null;
 
@@ -40,8 +41,9 @@ export function randomId(n = 14) {
 }
 
 // Adres dat de telefoon opent (via de QR-code).
+// ?v= = versie van de tablet: een oudere scanpagina ziet zo dat ze moet verversen.
 export function scanUrl(id) {
-  return new URL("../scan.html#" + id, import.meta.url).href;
+  return new URL(`../scan.html?v=${encodeURIComponent(BUILD)}#${id}`, import.meta.url).href;
 }
 
 // Standaard de gratis PeerJS-koppelserver. Eigen server of testserver: zet
