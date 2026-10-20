@@ -81,12 +81,16 @@ toont wat de tablet heeft, dus opnieuw verbinden na de camera-app gaat vanzelf g
   rechttrekken, papier wit maken (delen door de geschatte achtergrond) en verbeteren, en dan het resultaat
   controleren in het gewone aanpasscherm (knijpen/dubbeltik = inzoomen; *Klaar* of terug = naar de tablet,
   prullenbak = weggooien, *Opnieuw* = nieuwe foto). Aanpassen kan
-  daar en later (tik op een pagina): hoeken (met vergrootglas), draaien, filter *Zwart-wit* of *Grijs*,
+  daar en later (tik op een pagina): hoeken en hele zijkanten (met vergrootglas), draaien, filter *Zwart-wit* of *Grijs*,
   schuifje *Schoner ⟷ Meer details*, *Spikkels weg* (losse vlekjes kleiner dan ± 3 px worden wit; noten
-  en staccato-punten blijven) en *Krom blad*. De laatste keuzes gelden voor de volgende foto's. Laatste
+  en staccato-punten blijven) en *Kromming weg* (gebogen blad rechttrekken). De laatste keuzes gelden voor de volgende foto's. Laatste
   scan linksonder in de camera. OpenCV (± 3,5 MB over de lijn) wordt alleen op de telefoon geladen en
   daar apart gecachet (`muzi-opencv-*`).
-- **Krom blad** (`dewarp` in `js/docscan.js`): de notenbalken horen recht te lopen. Het blad wordt in
+- **Blad zoeken** (`detectQuad`, `detectQuadBest`): eerst op klein formaat (zelfde als het live kader),
+  pas daarna groter; van de gevonden vierhoeken wint die met de lichtste rand binnen t.o.v. erbuiten
+  (papier op een donkerdere ondergrond), zodat een patroon in een kleed of tafel niet wint. Lukt het
+  op de foto niet, dan geldt het kader dat live in beeld was.
+- **Kromming weg** (`dewarp` in `js/docscan.js`): de notenbalken horen recht te lopen. Het blad wordt in
   staande stroken geknipt; per strook wordt gemeten hoeveel het lijnenpatroon verschuift t.o.v. de
   buurstrook, dat wordt per hoogte glad gemaakt (kromme graad 3) en de pixels worden teruggeschoven.
 - **Scherm aan**: tablet en telefoon houden het scherm aan zolang scannen open is (wake lock). Valt de

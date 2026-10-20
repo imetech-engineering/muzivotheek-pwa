@@ -8,7 +8,7 @@
 import { h, toast } from "./ui.js";
 import { icon } from "./icons.js";
 import { decodeImage } from "./imgpdf.js";
-import { loadCv, detectQuad, warp, dewarp, enhance, matToCanvas, fullQuad } from "./docscan.js";
+import { loadCv, detectQuadBest, warp, dewarp, enhance, matToCanvas, fullQuad } from "./docscan.js";
 
 const MODES = [
   ["bw", "Zwart-wit"],
@@ -213,7 +213,8 @@ function zoomable(stage, el) {
 // source = foto, prev = instellingen (bij aanpassen).
 // → {blob, original, settings}, {remove: true}, {retake: true}, of null
 //   (review: weggegooid; aanpassen: niets veranderd).
-export function editScan(source, prev = null, { title: titleText = "Aanpassen", review = false, retake = true } = {}) {
+// hint = {quad, aspect}: live kader uit de camera, als de foto zelf geen blad oplevert.
+export function editScan(source, prev = null, { title: titleText = "Aanpassen", review = false, retake = true, hint = null } = {}) {
   return new Promise(async (resolve) => {
     let cv = null;
     let full = null;
@@ -241,18 +242,26 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
     const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
     poly.setAttribute("class", "se-poly");
     svg.append(poly);
-    const handles = [0, 1, 2, 3].map((i) => {
+    // 0-3 hoeken (linksboven, rechtsboven, rechtsonder, linksonder);
+    // 4-7 midden van de zijden boven, rechts, onder, links: hele zijkant verschuiven.
+    const handles = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
       const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      c.setAttribute("class", "se-handle");
+      c.setAttribute("class", i < 4 ? "se-handle" : "se-handle side");
       c.dataset.i = i;
       svg.append(c);
       return c;
     });
+    // Punt van greep i (fracties).
+    const handlePos = (i) => {
+      if (i < 4) return s.quad[i];
+      const a = s.quad[i - 4];
+      const b = s.quad[(i - 3) % 4];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    };
     const frame = h("div", { class: "se-frame" }, view, svg);
     const result = h("canvas", { class: "se-result" });
     const loupe = h("canvas", { class: "se-loupe", width: 240, height: 240, hidden: true });
-    const hint = h("div", { class: "se-hint" }, "Knijp of tik twee keer om in te zoomen");
-    const stage = h("div", { class: "se-stage" }, frame, result, loupe, hint, busy);
+    const stage = h("div", { class: "se-stage" }, frame, result, loupe, busy);
 
     const autoBtn = h("button", { type: "button", class: "btn se-btn" });
     const cornersDone = h("button", { type: "button", class: "btn primary se-btn" }, "Klaar");
@@ -273,7 +282,7 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
     );
     const chip = (label) => h("button", { type: "button", class: "se-chip", "aria-pressed": "false", html: `<i></i><span>${label}</span>` });
     const speckBtn = chip("Spikkels weg");
-    const curveBtn = chip("Krom blad");
+    const curveBtn = chip("Kromming weg");
     const curveRow = h("div", { class: "se-extra" }, speckBtn, curveBtn);
     const cornersBtn = h("button", { type: "button", class: "btn se-btn", html: icon("crop") + "<span>Hoeken</span>" });
     const retakeBtn = h("button", { type: "button", class: "btn se-btn", html: icon("camera") + "<span>Opnieuw</span>" });
@@ -313,7 +322,7 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
       frame.style.width = Math.round(small.width * k) + "px";
       frame.style.height = Math.round(small.height * k) + "px";
       // Hoekpunten 14 schermpixels groot, lijnen 2,5 px, ongeacht de fotogrootte.
-      handles.forEach((c) => c.setAttribute("r", (14 / k).toFixed(2)));
+      handles.forEach((c, i) => c.setAttribute("r", ((i < 4 ? 14 : 10) / k).toFixed(2)));
       svg.style.setProperty("--sw", (2.5 / k).toFixed(2));
     }
 
@@ -322,9 +331,10 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
       const W = small.width;
       const H = small.height;
       poly.setAttribute("points", s.quad.map((p) => `${p.x * W},${p.y * H}`).join(" "));
-      s.quad.forEach((p, i) => {
-        handles[i].setAttribute("cx", p.x * W);
-        handles[i].setAttribute("cy", p.y * H);
+      handles.forEach((c, i) => {
+        const p = handlePos(i);
+        c.setAttribute("cx", p.x * W);
+        c.setAttribute("cy", p.y * H);
       });
       const isFull = s.quad.every((p, i) => Math.abs(p.x - fullQuad()[i].x) < 0.002 && Math.abs(p.y - fullQuad()[i].y) < 0.002);
       autoBtn.innerHTML = isFull && auto ? icon("crop") + "<span>Automatisch</span>" : icon("expand") + "<span>Hele foto</span>";
@@ -353,16 +363,18 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
     }
 
     let drag = -1;
+    let dragStart = null; // zijkant: {x, y, quad} bij het begin
     svg.addEventListener("pointerdown", (e) => {
       if (step !== 1) return;
-      // Dichtstbijzijnde hoek pakken (ruime vingermarge).
+      // Dichtstbijzijnde greep pakken (ruime vingermarge); hoeken gaan voor bij gelijke afstand.
       const r = frame.getBoundingClientRect();
       const fx = (e.clientX - r.left) / r.width;
       const fy = (e.clientY - r.top) / r.height;
       let best = -1;
       let bd = Infinity;
-      s.quad.forEach((p, i) => {
-        const d = Math.hypot((p.x - fx) * r.width, (p.y - fy) * r.height);
+      handles.forEach((_, i) => {
+        const p = handlePos(i);
+        const d = Math.hypot((p.x - fx) * r.width, (p.y - fy) * r.height) + (i < 4 ? 0 : 6);
         if (d < bd) {
           bd = d;
           best = i;
@@ -370,21 +382,38 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
       });
       if (bd > 70) return;
       drag = best;
+      dragStart = { x: fx, y: fy, quad: s.quad.map((p) => ({ ...p })) };
       svg.setPointerCapture(e.pointerId);
       handles[drag].classList.add("on");
-      showLoupe(s.quad[drag], e.clientX);
+      showLoupe(handlePos(drag), e.clientX);
       e.preventDefault();
       e.stopPropagation();
     });
+    const clamp01 = (v) => Math.min(1, Math.max(0, v));
     svg.addEventListener("pointermove", (e) => {
       if (drag < 0) return;
       const r = frame.getBoundingClientRect();
-      s.quad[drag] = {
-        x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-        y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
-      };
+      const fx = (e.clientX - r.left) / r.width;
+      const fy = (e.clientY - r.top) / r.height;
+      if (drag < 4) {
+        s.quad[drag] = { x: clamp01(fx), y: clamp01(fy) };
+      } else {
+        // Zijkant: beide hoeken evenveel loodrecht op de zijde verschuiven.
+        const a = drag - 4;
+        const b = (drag - 3) % 4;
+        const q0 = dragStart.quad;
+        const ex = (q0[b].x - q0[a].x) * r.width;
+        const ey = (q0[b].y - q0[a].y) * r.height;
+        const len = Math.hypot(ex, ey) || 1;
+        const nx = -ey / len;
+        const ny = ex / len;
+        const dx = (fx - dragStart.x) * r.width;
+        const dy = (fy - dragStart.y) * r.height;
+        const t = dx * nx + dy * ny;
+        for (const i of [a, b]) s.quad[i] = { x: clamp01(q0[i].x + (t * nx) / r.width), y: clamp01(q0[i].y + (t * ny) / r.height) };
+      }
       drawQuad();
-      showLoupe(s.quad[drag], e.clientX);
+      showLoupe(handlePos(drag), e.clientX);
     });
     const endDrag = () => {
       if (drag >= 0) handles[drag].classList.remove("on");
@@ -452,7 +481,6 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
       title.textContent = n === 1 ? "Hoeken" : titleText;
       frame.hidden = n !== 1;
       result.hidden = n !== 2;
-      hint.hidden = n !== 2;
       bar1.hidden = n !== 1;
       bar2.hidden = n !== 2;
       modesRow.hidden = n !== 2;
@@ -523,7 +551,7 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
     window.addEventListener("resize", layout);
 
     // ---------- starten ----------
-    for (const el of [frame, result, hint, bar1, bar2, modesRow, levelRow, curveRow]) el.hidden = true;
+    for (const el of [frame, result, bar1, bar2, modesRow, levelRow, curveRow]) el.hidden = true;
     setBusy("Foto openen…");
     try {
       ({ full, small } = await openPhoto(source));
@@ -553,11 +581,10 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
     pipe = makePipeline(cv, full);
     setBusy("Blad zoeken…");
     await tick();
-    try {
-      auto = detectQuad(cv, small);
-    } catch (e) {
-      console.error(e);
-    }
+    auto = detectQuadBest(cv, full);
+    // Niets gevonden op de foto, wel in de camera: dat kader gebruiken
+    // (alleen als foto en camerabeeld dezelfde vorm hebben).
+    if (!auto && hint && hint.quad && Math.abs(full.width / full.height / hint.aspect - 1) < 0.03) auto = hint.quad.map((p) => ({ ...p }));
     if (!s.quad) s.quad = auto ? auto.map((p) => ({ ...p })) : fullQuad();
     setBusy("");
     // Geen blad gevonden: meteen naar de hoeken.

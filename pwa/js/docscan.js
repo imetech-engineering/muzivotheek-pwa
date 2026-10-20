@@ -136,22 +136,72 @@ export function detectQuad(cv, canvas) {
             const a = polyArea(q);
             // Niet het hele beeld (rand van de foto) en geen rare smalle vormen.
             const nearFull = a > W * H * 0.97;
-            if (!nearFull && a >= minArea) cands.push({ q, a });
+            if (!nearFull && a >= minArea && cands.length < 40) cands.push({ q, a });
             break;
           }
           if (ap.rows < 4) break;
         }
       }
     }
+    // Papier is lichter dan de ondergrond: vlak binnen de rand moet het duidelijk lichter
+    // zijn dan vlak erbuiten. Een vierhoek uit het patroon van een kleed of tafel valt af.
+    const band = Math.max(3, Math.round(Math.min(W, H) * 0.02));
+    const kern = k(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(band * 2 + 1, band * 2 + 1)));
+    for (const c of cands) {
+      const m = k(cv.Mat.zeros(H, W, cv.CV_8UC1));
+      const pts = k(cv.matFromArray(4, 1, cv.CV_32SC2, c.q.flatMap((p) => [p.x, p.y])));
+      const vec = k(new cv.MatVector());
+      vec.push_back(pts);
+      cv.fillPoly(m, vec, new cv.Scalar(255));
+      const inner = k(new cv.Mat());
+      const outer = k(new cv.Mat());
+      cv.erode(m, inner, kern);
+      cv.dilate(m, outer, kern);
+      cv.subtract(m, inner, inner); // smalle strook binnen de rand
+      cv.subtract(outer, m, outer); // smalle strook buiten de rand
+      const hasOut = cv.countNonZero(outer) > band * 10;
+      c.contrast = hasOut ? cv.mean(blur, inner)[0] - cv.mean(blur, outer)[0] : 0;
+    }
   });
   if (!cands.length) return null;
-  cands.sort((a, b) => b.a - a.a);
+  // Duidelijk lichter dan de omgeving gaat voor; daarbinnen de grootste.
+  const light = cands.filter((c) => c.contrast > 12);
+  (light.length ? light : cands).sort((a, b) => b.a - a.a);
+  if (light.length) cands.splice(0, cands.length, ...light);
   // Iets naar binnen, zodat er geen randje tafel mee komt.
   const q = cands[0].q;
   const cx = q.reduce((a, p) => a + p.x, 0) / 4;
   const cy = q.reduce((a, p) => a + p.y, 0) / 4;
   const inset = 0.012;
   return q.map((p) => ({ x: (p.x + (cx - p.x) * inset) / W, y: (p.y + (cy - p.y) * inset) / H }));
+}
+
+// Blad zoeken op een paar maten, klein eerst (zelfde maat als het live kader in de
+// camera). Op groot formaat geven vloerkleed of houtnerf zoveel randen dat het blad
+// soms niet meer als vierhoek uit de verf komt; klein is dat weggevaagd.
+export function detectQuadBest(cv, canvas) {
+  for (const side of [360, 560, 900]) {
+    const k = Math.min(1, side / Math.max(canvas.width, canvas.height));
+    let c = canvas;
+    if (k < 1) {
+      c = document.createElement("canvas");
+      c.width = Math.round(canvas.width * k);
+      c.height = Math.round(canvas.height * k);
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(canvas, 0, 0, c.width, c.height);
+    }
+    let q = null;
+    try {
+      q = detectQuad(cv, c);
+    } catch (e) {
+      console.error(e);
+    }
+    if (c !== canvas) c.width = c.height = 0;
+    if (q) return q;
+    if (k === 1) break; // kleiner bestaat niet: groter proberen heeft geen zin
+  }
+  return null;
 }
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);

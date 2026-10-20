@@ -2775,6 +2775,14 @@ body.cam-open {
 .se-handle.on {
   fill: #ff3d8b;
 }
+.se-handle.side {
+  fill: #ff3d8b;
+  stroke: #fff;
+}
+.se-handle.side.on {
+  fill: #fff;
+  stroke: #ff3d8b;
+}
 .se-result {
   max-width: calc(100% - 32px);
   max-height: calc(100% - 32px);
@@ -2782,28 +2790,6 @@ body.cam-open {
   box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5);
   transform-origin: 0 0; /* inzoomen (zoomable in scanedit.js) */
   will-change: transform;
-}
-.se-hint {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  transform: translateX(-50%);
-  padding: 5px 12px;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.55);
-  font-size: 13px;
-  white-space: nowrap;
-  pointer-events: none;
-  animation: se-hint 4s forwards;
-}
-@keyframes se-hint {
-  0%,
-  70% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
 }
 .se-extra {
   flex: none;

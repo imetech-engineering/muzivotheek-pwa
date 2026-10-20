@@ -143,19 +143,19 @@ function setLast(id, blob) {
 // Opnieuw maken: nieuwe foto op dezelfde plek.
 async function retake(id) {
   const nr = st.pages.findIndex((p) => p.id === id) + 1;
-  const use = async (file) => {
-    const res = await review(file, nr ? `Pagina ${nr} opnieuw` : "Opnieuw", true);
+  const use = async (file, hint = null) => {
+    const res = await review(file, nr ? `Pagina ${nr} opnieuw` : "Opnieuw", true, hint);
     if (res && res.retake) return "again"; // camera blijft open voor nog een poging
     if (res && !res.remove) await replaceWith(id, res);
   };
   if (!cameraSupported()) return pick(true, (files) => files[0] && use(files[0]));
-  await openCamera((blob) => use(new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })), { single: true });
+  await openCamera((blob, hint) => use(new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" }), hint), { single: true });
 }
 
 // Nieuwe foto: automatisch bijgesneden resultaat laten controleren.
-async function review(file, title, canRetake) {
+async function review(file, title, canRetake, hint = null) {
   try {
-    return await editScan(file, null, { review: true, title, retake: canRetake });
+    return await editScan(file, null, { review: true, title, retake: canRetake, hint });
   } catch (e) {
     console.error(e);
     toast(`Foto "${file.name}" lukt niet`, 3000);
@@ -164,12 +164,12 @@ async function review(file, title, canRetake) {
 }
 
 // fromCamera: Opnieuw = gewoon terug naar de camera.
-async function addFiles(files, fromCamera = false) {
+async function addFiles(files, fromCamera = false, hint = null) {
   files = files.filter(isImageFile);
   if (!files.length) return;
   for (const f of files) {
     const nr = st.pages.length + st.pending.length + 1;
-    const res = await review(f, `Pagina ${nr}`, fromCamera);
+    const res = await review(f, `Pagina ${nr}`, fromCamera, hint);
     if (!res || res.retake || res.remove) continue; // opnieuw of weggegooid
     const n = ++st.counter;
     const stamp = new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, ".");
@@ -203,7 +203,7 @@ function pick(capture, onFiles = addFiles) {
 els.shoot.addEventListener("click", () => {
   // Camera in de pagina: Chrome blijft actief. Geen camera-toegang? Dan de camera-app.
   if (!cameraSupported()) return pick(true);
-  openCamera((blob) => addFiles([new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })], true), {
+  openCamera((blob, hint) => addFiles([new File([blob], "camera.jpg", { type: blob.type || "image/jpeg" })], true, hint), {
     counter: () => (st.pages.length ? `${st.pages.length} op de tablet` : ""),
     thumb: () => st.last,
     onThumb: () => st.last && reedit(st.last.id),

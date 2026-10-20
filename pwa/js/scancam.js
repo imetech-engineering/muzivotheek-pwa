@@ -2,7 +2,8 @@
 // met de losse camera-app kan Android Chrome op de achtergrond afsluiten wegens
 // geheugengebrek, en dan is de foto weg.
 //
-// openCamera(onShot) houdt de camera open; onShot(blob) wordt per foto aangeroepen
+// openCamera(onShot) houdt de camera open; onShot(blob, hint) wordt per foto aangeroepen
+// (hint = {quad, aspect}: het live kader op het moment van de foto, of null)
 // (en mag een Promise teruggeven, bijv. het verwerken). Klaar = sluiten.
 // Opties: single = na één foto dicht (opnieuw maken); thumb() = {url} van de
 // laatste scan, linksonder; tikken = onThumb() (camera staat dan even uit).
@@ -126,10 +127,12 @@ export function openCamera(onShot, { counter = () => "", single = false, thumb =
       void flash.offsetWidth;
       flash.classList.add("go");
       try {
+        // Kader zoals het nu in beeld is: valt terug als de foto zelf geen blad oplevert.
+        const hint = quad && video.videoWidth ? { quad: quad.map((p) => ({ ...p })), aspect: video.videoWidth / video.videoHeight } : null;
         const blob = await grabFrame();
         // Camera even uit tijdens het verwerken: scheelt veel geheugen op de telefoon.
         stop();
-        const r = blob ? await onShot(blob) : null;
+        const r = blob ? await onShot(blob, hint) : null;
         if (single && blob && r !== "again") return close();
       } catch (e) {
         console.error(e);
