@@ -453,7 +453,9 @@ export function editScan(source, prev = null, { title: titleText = "Aanpassen", 
         const w = result.width;
         const hh = result.height;
         pipe.render(s, result);
-        if (!quiet || result.width !== w || result.height !== hh) zoom.reset();
+        // Zoom houden bij filter, schuifje, spikkels en kromming; alleen een andere
+        // vorm (draaien, andere hoeken) begint weer passend in beeld.
+        if (result.width !== w || result.height !== hh) zoom.reset();
         if (!quiet && s.curve && pipe.curveFailed) toast("Geen kromming gevonden (te weinig notenbalken of al recht)", 3000);
       } catch (e) {
         console.error(e);
