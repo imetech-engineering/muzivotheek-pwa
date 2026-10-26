@@ -1,7 +1,8 @@
 // Volledig-scherm lezer voor één nummer (of een afspeellijst).
 //
 // Bladeren: tik rechts/links, veeg, pedaal (toetsen), of gewoon scrollen.
-// Midden tikken toont/verbergt de knoppen. Knijpen of dubbeltik = zoomen.
+// Midden tikken toont/verbergt de knoppen. Dubbeltik = krabbels (ingezoomd: uitzoomen).
+// Knijpen = zoomen.
 
 import { db } from "./db.js";
 import { loadPdf, renderPage, pageAspect, findContentBox } from "./pdf.js";
@@ -1202,13 +1203,13 @@ function attachGestures(stage) {
       return S().tapLeftPrev ? prev() : next();
     }
     if (st.tool) return;
-    // Midden: enkel = knoppen tonen/verbergen, dubbel = zoomen.
+    // Midden: enkel = knoppen tonen/verbergen, dubbel = krabbels (ingezoomd: eerst uitzoomen).
     const now = performance.now();
     if (lastTap && now - lastTap.t < 300 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 40) {
       clearTimeout(lastTap.timer);
       lastTap = null;
       if (cam.z > 1.01) animateCam({ x: 0, y: 0, z: 1 }, 220, sharpenSoon);
-      else zoomAt(2.2, p.x, p.y);
+      else setTool("pen");
       return;
     }
     const timer = setTimeout(() => {
