@@ -6,7 +6,7 @@ import qrcode from "../vendor/qrcode/qrcode.mjs";
 import { h, fill, toast, dialog, confirmDlg } from "./ui.js";
 import { icon } from "./icons.js";
 import { shrinkImage } from "./imgpdf.js";
-import { PREFIX, loadPeer, randomId, scanUrl, peerOptions, peerErrorText, blobToDataUrl } from "./phonelink.js";
+import { PREFIX, loadPeer, randomId, scanUrl, peerOptions, peerErrorText, blobToDataUrl, watchOpen, NO_LAN_TEXT, NO_LAN_TIP } from "./phonelink.js";
 
 function qrSvg(text) {
   const qr = qrcode(0, "M");
@@ -206,12 +206,14 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
   }
 
   function onConnection(c) {
-    if (conn && conn !== c) {
+    // Eerst de nieuwe vastleggen, dan pas de oude sluiten: anders toont die "niet meer verbonden".
+    const old = conn;
+    conn = c;
+    if (old && old !== c) {
       try {
-        conn.close();
+        old.close();
       } catch (e) {}
     }
-    conn = c;
     c.on("open", () => {
       if (conn !== c) return;
       setStatus("Telefoon verbonden. Maak de foto's op de telefoon.", "ok");
@@ -227,6 +229,10 @@ export async function scanWithPhone({ purpose = "import", title = "", onDone }) 
       render();
     });
     c.on("error", (e) => console.warn("verbinding", e));
+    // Telefoon gevonden, maar de verbinding gaat niet open (de telefoon probeert het zelf opnieuw).
+    watchOpen(c, {
+      onSlow: () => conn === c && !closed && setStatus(`Telefoon gevonden. ${NO_LAN_TEXT} ${NO_LAN_TIP}`, "warn"),
+    });
   }
 
   async function start() {

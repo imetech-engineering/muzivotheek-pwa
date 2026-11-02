@@ -60,6 +60,38 @@ export function peerErrorText(err) {
   return "Verbinden lukt niet" + (type ? ` (${type})` : "");
 }
 
+// Verbinding die maar niet opengaat in de gaten houden. Komt vooral voor als telefoon en
+// tablet op hetzelfde wifi zitten maar elkaar daar niet kunnen bereiken (bijv. de ene op
+// 5 GHz en de andere op 2,4 GHz, of een router die apparaten van elkaar afschermt).
+// PeerJS meldt dan niets; de verbinding blijft eindeloos "bezig".
+//   onSlow:   na SLOW_MS nog niet open (melding tonen, verbinding laten lopen)
+//   onFailed: WebRTC geeft het op, of na FAIL_MS nog niet open (opnieuw proberen)
+// Geeft een functie terug die het opruimt.
+export const SLOW_MS = 15000;
+export const FAIL_MS = 40000;
+export const NO_LAN_TEXT = "Verbinden lukt niet via dit wifi-netwerk.";
+export const NO_LAN_TIP = "Zet op de telefoon de wifi uit (mobiele data), of verbind telefoon en tablet met precies hetzelfde wifi-netwerk.";
+
+export function watchOpen(conn, { onSlow, onFailed }) {
+  let done = false;
+  const stop = () => {
+    done = true;
+    clearTimeout(slow);
+    clearTimeout(fail);
+  };
+  const failed = () => {
+    if (done || conn.open) return;
+    stop();
+    onFailed && onFailed();
+  };
+  const slow = setTimeout(() => !done && !conn.open && onSlow && onSlow(), SLOW_MS);
+  const fail = setTimeout(failed, FAIL_MS);
+  conn.on("open", stop);
+  conn.on("close", stop);
+  conn.on("iceStateChanged", (s) => s === "failed" && failed());
+  return stop;
+}
+
 // Kleine voorbeeldplaatjes als data-URL (om mee te sturen naar de telefoon).
 export function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {

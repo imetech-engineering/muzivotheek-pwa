@@ -8,7 +8,7 @@ import { $, h, fill, toast, menu, promptDlg } from "./ui.js";
 import { icon } from "./icons.js";
 import { isImageFile } from "./imgpdf.js";
 import { applyTheme } from "./settings.js";
-import { PREFIX, BUILD, loadPeer, randomId, peerOptions, peerErrorText } from "./phonelink.js";
+import { PREFIX, BUILD, loadPeer, randomId, peerOptions, peerErrorText, watchOpen, NO_LAN_TEXT, NO_LAN_TIP } from "./phonelink.js";
 import { openCamera, cameraSupported } from "./scancam.js";
 import { editScan, preloadScanner } from "./scanedit.js";
 
@@ -326,6 +326,34 @@ function connect() {
     setTimeout(connect, 2000);
   });
   c.on("error", (e) => console.warn("verbinding", e));
+  // Gaat de verbinding niet open, dan blijft PeerJS stil. Zelf melden en opnieuw proberen
+  // (bijv. nadat de wifi is uitgezet).
+  watchOpen(c, {
+    onSlow: () => st.conn === c && setStatus(`${NO_LAN_TEXT} ${NO_LAN_TIP}`, "warn"),
+    onFailed: () => {
+      if (st.conn !== c) return;
+      setStatus(`${NO_LAN_TEXT} ${NO_LAN_TIP} Blijft proberen…`, "warn");
+      retryNow(c);
+    },
+  });
+}
+
+// Hangende verbinding opgeven en een nieuwe proberen (zonder de "verbinding kwijt"-melding).
+function retryNow(c, delay = 1500) {
+  if (st.conn !== c) return;
+  st.conn = null;
+  try {
+    c.close();
+  } catch (e) {}
+  render();
+  setTimeout(() => !st.conn && connect(), delay);
+}
+
+// Wifi uit of aan gezet terwijl we nog niet verbonden zijn: meteen opnieuw proberen.
+if (navigator.connection && navigator.connection.addEventListener) {
+  navigator.connection.addEventListener("change", () => {
+    if (st.conn && !st.conn.open) retryNow(st.conn, 2500);
+  });
 }
 
 async function start() {

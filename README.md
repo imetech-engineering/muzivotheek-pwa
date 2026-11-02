@@ -72,6 +72,10 @@ toont wat de tablet heeft, dus opnieuw verbinden na de camera-app gaat vanzelf g
 - **Koppelen** gaat één keer via de gratis PeerJS-koppelserver (`0.peerjs.com`); de foto's zelf gaan
   direct van apparaat naar apparaat (zelfde wifi), of via de PeerJS-relay als dat niet lukt.
   Er wordt niets bewaard. Beide apparaten hebben internet nodig voor het koppelen.
+- **Verbinding gaat niet open** (telefoon en tablet op hetzelfde wifi, maar ze bereiken elkaar niet, bijv. 5 GHz en
+  2,4 GHz of een router die apparaten afschermt): na 15 s tonen telefoon en tablet een melding met de tip om op de
+  telefoon mobiele data te gebruiken of hetzelfde wifi-netwerk. De telefoon probeert het zelf opnieuw (na 40 s, als
+  WebRTC het opgeeft, of meteen als de wifi aan/uit gaat). Zie `watchOpen` in `js/phonelink.js`.
 - **Eigen koppelserver** (als de gratis server ooit hapert): zet vóór het laden
   `window.MUZI_PEER = { host, port, path, secure }` (bijv. in `config.js`). Zie `js/phonelink.js`.
 - **Testen** lokaal: `npx peerjs --port 9000` en `window.MUZI_PEER = {host:"127.0.0.1", port:9000, path:"/", secure:false}`.
