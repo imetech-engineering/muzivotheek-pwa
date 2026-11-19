@@ -28,6 +28,7 @@ const ASSETS = [
   "./js/sp_ui.js",
   "./config.js",
   "./auth.html",
+  "./js/quick.js",
   "./js/ui.js",
   "./js/update.js",
   "./js/viewer.js",

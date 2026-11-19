@@ -5,6 +5,7 @@ import { allSongs, getSong, saveSong, importPdf, deleteSong, sortSongs, matches,
 import { allSetlists, getSetlist, saveSetlist, newSetlist, deleteSetlist, duplicateSetlist, addToSetlist } from "./setlists.js";
 import { settings, setSetting, resetSettings, applyTheme } from "./settings.js";
 import { openSong, attachAudio, viewerOpen } from "./viewer.js";
+import { refreshQuick } from "./quick.js";
 import { loadPdf, makeThumb } from "./pdf.js";
 import { exportBackup, importBackup, downloadBlob } from "./backup.js";
 import { Metronome, tempoName } from "./metronome.js";
@@ -508,6 +509,7 @@ async function songMenu(s) {
     { label: "Pagina's toevoegen (PDF of foto)", value: "append", icon: icon("plus") },
     { label: "Selecteren (meerdere)", value: "select", icon: icon("check") },
     { label: s.favorite ? "Geen favoriet meer" : "Favoriet", value: "fav", icon: icon("star") },
+    { label: S().quickSong === s.id ? "Sneltoets weghalen" : "Als sneltoets (knop bovenin)", value: "quick", icon: icon("bolt") },
     { label: "Gegevens bewerken", value: "edit", icon: icon("edit") },
     { label: s.audioId || s.youtube ? "Opname / YouTube wijzigen" : "Opname of YouTube toevoegen", value: "edit", icon: icon("audio") },
     navigator.canShare ? { label: "Delen", value: "share", icon: icon("share") } : null,
@@ -520,6 +522,11 @@ async function songMenu(s) {
   if (v === "fav") {
     s.favorite = !s.favorite;
     await saveSong(s);
+  }
+  if (v === "quick") {
+    const on = S().quickSong !== s.id;
+    setSetting("quickSong", on ? s.id : null);
+    toast(on ? `Sneltoets: ${s.title}` : "Sneltoets weggehaald", 1800);
   }
   if (v === "edit") editSong(s.id);
   if (v === "share") shareSong(s);
@@ -1570,7 +1577,12 @@ function init() {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
   document.addEventListener("settings", (e) => {
     if (e.detail.key === "theme" || !e.detail.key) applyTheme();
+    if (e.detail.key === "quickSong" || !e.detail.key) refreshQuick();
   });
+  // Sneltoets: één nummer, altijd bovenin, één tik = openen.
+  const quick = h("button", { type: "button", class: "quick-btn", id: "quick-btn", hidden: true, onclick: () => S().quickSong && openSong(S().quickSong), html: icon("bolt") });
+  $(".app-header").append(quick);
+  refreshQuick();
   $$(".bottom-nav button").forEach((b) => b.addEventListener("click", () => {
     if (b.dataset.tab === "lists" && state.tab === "lists") state.openList = null;
     setTab(b.dataset.tab);
@@ -1585,6 +1597,7 @@ function init() {
     thumbUrls.delete(e.detail);
   });
   document.addEventListener("library", () => {
+    refreshQuick(); // nummer hernoemd of verwijderd
     if (viewerOpen()) return;
     if (state.tab === "songs") renderSongs();
     if (state.tab === "lists") renderLists();

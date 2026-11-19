@@ -106,6 +106,28 @@ button {
   border-left: 1px solid var(--line);
   padding-left: 12px;
 }
+/* Sneltoets: één nummer, rechts in de kop. */
+.quick-btn {
+  margin-left: auto;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border: 0;
+  border-radius: 14px;
+  background: var(--pink);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
+}
+.quick-btn .ic {
+  width: 26px;
+  height: 26px;
+}
+.quick-btn:active {
+  transform: scale(0.94);
+}
 html[data-theme="dark"] .brand-logo {
   filter: drop-shadow(0 0 0.5px #fff);
 }
@@ -1703,6 +1725,16 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
   align-items: center;
   gap: 8px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+/* Terug na de sneltoets: boven de gewone "Terug" van sprongen. */
+.v-quickback {
+  bottom: calc(150px + var(--safe-b));
+  max-width: calc(100% - 32px);
+}
+.v-quickback span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .v-scrollpill {
   position: absolute;

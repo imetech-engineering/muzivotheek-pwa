@@ -25,6 +25,9 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
   (crescendo/decrescendo ook langer te slepen over meerdere maten, zonder dat ze hoger worden),
   verslepen, eigen tekst, gum, ongedaan maken. Lang stil indrukken pakt een krabbel op; wie schuift of een
   uitlopende scroll stopt, pakt niets. Het schermtoetsenbord (tekst typen) laat de pagina op zijn plek.
+- **Sneltoets**: één nummer met de bliksemknop altijd bovenin (bibliotheek en lezer); één tik opent het.
+  Instellen via het menu van een nummer (*Als sneltoets*) of in de lezer onder *Meer*. Vanuit een ander nummer
+  of een afspeellijst brengt *Terug: …* je naar dezelfde pagina terug. Zie `js/quick.js` en `openQuick` in `js/viewer.js`.
 - **Bladwijzers en sprongen**: sprong-knopjes op de pagina voor herhalingen/D.S./coda, met *Terug*.
 - **Afspeellijsten**: maken, volgorde slepen, kopiëren; spelen loopt door naar het volgende nummer.
 - **Metronoom** (ook in de lezer, tempo per nummer bewaard) en **stemapparaat** (C/B♭/E♭/F).

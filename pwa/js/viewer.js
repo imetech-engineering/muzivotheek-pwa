@@ -37,6 +37,7 @@ const st = {
   selected: null, // geselecteerd teken {page, item}
   undo: [],
   returnPage: 0,
+  quickBack: null, // via de sneltoets hierheen: {id, page, listId, index, title} om terug te gaan
   prevMode: null, // weergave vóór de snelknop Scroll
   metro: new Metronome(),
   wake: null,
@@ -92,6 +93,9 @@ export async function openSong(songId, opts = {}) {
   st.ink.clear();
   st.undo = [];
   st.returnPage = 0;
+  $("#v-return").hidden = true;
+  st.quickBack = opts.quickBack || null;
+  updateQuickBack();
   st.metro.setBpm(song.bpm || 100);
   if (song.beats) st.metro.beats = song.beats;
   setTool(null);
@@ -177,6 +181,7 @@ function buildDom() {
     h(
       "div",
       { class: "v-actions" },
+      btn("bolt", "Sneltoets", () => openQuick(), "v-quickbtn"),
       btn("bookmark", "Bladwijzer", () => togglePanel("marks")),
       btn("pen", "Krabbels", () => (st.tool ? setTool(null) : setTool("pen"))),
       btn("metronome", "Tempo", () => togglePanel("metro")),
@@ -199,6 +204,7 @@ function buildDom() {
   const panel = h("div", { class: "v-panel", id: "v-panel", hidden: true });
   const ret = h("button", { type: "button", class: "v-return", id: "v-return", hidden: true, onclick: () => jumpBack(), html: icon("undo") + "<span>Terug</span>" });
   const scrollPill = h("div", { class: "v-scrollpill", id: "v-scrollpill", hidden: true });
+  const quickBack = h("button", { type: "button", class: "v-return v-quickback", id: "v-quickback", hidden: true, onclick: () => quickReturn() });
 
   const ytBox = h("div", { class: "v-yt-box", id: "v-yt-box" }, h("div", { id: "v-yt-frame" }));
   const badge = h("div", { class: "v-badge", id: "v-badge", role: "status" });
@@ -208,7 +214,7 @@ function buildDom() {
     h("button", { type: "button", class: "v-drawnav left", "aria-label": "Vorige pagina", onclick: () => prev(), html: icon("left") }),
     h("button", { type: "button", class: "v-drawnav right", "aria-label": "Volgende pagina", onclick: () => next(), html: icon("right") }),
   ];
-  r.append(stage, flash, badge, top, bottom, tools, ...drawNav, panel, ytBox, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
+  r.append(stage, flash, badge, top, bottom, tools, ...drawNav, panel, ytBox, ret, quickBack, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
   attachGestures(stage);
   let lastW = 0;
   let lastH = 0;
@@ -793,6 +799,43 @@ function updateChrome() {
     $("#v-nextsong").disabled = st.listIndex >= st.list.songIds.length - 1;
   }
   root().classList.toggle("has-audio", !!st.song.audioId);
+  const qb = $(".v-quickbtn");
+  if (qb) qb.hidden = !S().quickSong || S().quickSong === st.song.id;
+}
+
+// ---------- sneltoets ----------
+// Eén tik op de bliksem: naar het sneltoets-nummer. De plek waar je was
+// (nummer, pagina, afspeellijst) onthouden voor de knop "Terug".
+
+async function openQuick() {
+  const id = S().quickSong;
+  if (!id || !st.song || id === st.song.id) return;
+  const back = { id: st.song.id, page: st.page, listId: st.list ? st.list.id : null, index: st.listIndex, title: st.song.title };
+  await openSong(id, { quickBack: back });
+}
+
+async function quickReturn() {
+  const b = st.quickBack;
+  if (!b) return;
+  await openSong(b.id, b.listId ? { setlistId: b.listId, index: b.index, page: b.page } : { page: b.page });
+}
+
+function updateQuickBack() {
+  const el = $("#v-quickback");
+  if (!el) return;
+  const b = st.quickBack;
+  el.hidden = !b;
+  if (b) {
+    el.innerHTML = icon("undo") + "<span></span>";
+    el.lastChild.textContent = "Terug: " + b.title;
+  }
+}
+
+function toggleQuick() {
+  const on = S().quickSong !== st.song.id;
+  setSetting("quickSong", on ? st.song.id : null);
+  toast(on ? "Sneltoets: " + st.song.title : "Sneltoets weggehaald", 1800);
+  updateChrome();
 }
 
 // ---------- halve pagina ----------
@@ -2465,7 +2508,8 @@ function renderMore(p) {
     tile("info", "Pagina­nummer", S().pageBadge, () => { setSetting("pageBadge", !S().pageBadge); updateBadge($("#v-count").textContent); if (S().pageBadge) toast("Sleep om te verplaatsen, tik voor groter", 2500); redraw(); }),
     tile("crop", "Randen weg", S().autoCrop, () => { setSetting("autoCrop", !S().autoCrop); clearCache(); render(); redraw(); }),
     tile("moon", "Nacht", S().nightSheet, () => { setSetting("nightSheet", !S().nightSheet); render(); redraw(); }),
-    tile("pen", "Krabbels", S().showNotes, () => { setSetting("showNotes", !S().showNotes); document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk); redraw(); })
+    tile("pen", "Krabbels", S().showNotes, () => { setSetting("showNotes", !S().showNotes); document.querySelectorAll("#v-pages .v-page").forEach(drawPageInk); redraw(); }),
+    tile("bolt", "Sneltoets", S().quickSong === st.song.id, () => { toggleQuick(); redraw(); })
   );
   const turn = h(
     "div",

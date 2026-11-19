@@ -34,6 +34,7 @@ export const DEFAULTS = {
   metroAccent: true,
   metroBeats: 4,
   tunerRef: 440,
+  quickSong: null, // id van het sneltoets-nummer (knop bovenin)
   tunerTranspose: 0, // 0 = C, 2 = Bes, -3 = Es (9), 7 = F
 };
 
