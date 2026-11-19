@@ -18,11 +18,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  # Bouwen en uploaden in een aparte job: de publicatie-job start pas als de
+  # upload helemaal klaar is. In één job vond deploy-pages het bestand soms nog
+  # niet ("No artifacts named github-pages were found").
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - name: Versie stempelen
@@ -33,5 +33,13 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: pwa
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
