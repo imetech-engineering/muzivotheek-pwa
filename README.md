@@ -23,7 +23,8 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
 - **Omslaan**: tik rechts/links, vegen, bluetooth-pedaal (PageUp/PageDown/pijltjes), of gewoon scrollen (optioneel schermbreed).
 - **Krabbels**: dubbeltik midden op de pagina opent meteen de pen. Pen, markeerstift, muzieksymbolen (Noto Music, OFL) met instelbare grootte
   (crescendo/decrescendo ook langer te slepen over meerdere maten, zonder dat ze hoger worden),
-  verslepen, eigen tekst, gum, ongedaan maken.
+  verslepen, eigen tekst, gum, ongedaan maken. Lang stil indrukken pakt een krabbel op; wie schuift of een
+  uitlopende scroll stopt, pakt niets. Het schermtoetsenbord (tekst typen) laat de pagina op zijn plek.
 - **Bladwijzers en sprongen**: sprong-knopjes op de pagina voor herhalingen/D.S./coda, met *Terug*.
 - **Afspeellijsten**: maken, volgorde slepen, kopiëren; spelen loopt door naar het volgende nummer.
 - **Metronoom** (ook in de lezer, tempo per nummer bewaard) en **stemapparaat** (C/B♭/E♭/F).

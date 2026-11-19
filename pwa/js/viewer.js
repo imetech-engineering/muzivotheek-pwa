@@ -210,20 +210,32 @@ function buildDom() {
   ];
   r.append(stage, flash, badge, top, bottom, tools, ...drawNav, panel, ytBox, ret, scrollPill, h("audio", { id: "v-audio-el", preload: "auto" }));
   attachGestures(stage);
-  let lastSize = "";
+  let lastW = 0;
+  let lastH = 0;
   new ResizeObserver(() => {
-    const s = stage.clientWidth + "x" + stage.clientHeight;
-    if (st.open && s !== lastSize) {
-      lastSize = s;
-      debounceRender();
-    }
+    const w = stage.clientWidth;
+    const hh = stage.clientHeight;
+    if (!st.open || (w === lastW && hh === lastH)) return;
+    // Schermtoetsenbord open/dicht (alleen de hoogte verandert terwijl er getypt wordt):
+    // niets opnieuw opbouwen, anders verspringt de pagina en vervalt de selectie.
+    if (w === lastW && typing()) return;
+    lastW = w;
+    lastH = hh;
+    debounceRender();
   }).observe(stage);
+}
+
+// Er staat een tekstveld open (dus waarschijnlijk ook het schermtoetsenbord).
+function typing() {
+  const a = document.activeElement;
+  return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
 }
 
 let renderTimer = 0;
 function debounceRender() {
   clearTimeout(renderTimer);
-  renderTimer = setTimeout(() => render(), 120);
+  // Formaat veranderd (draaien, venster): in scrollstand op dezelfde plek blijven.
+  renderTimer = setTimeout(() => render(false, true), 120);
 }
 
 // ---------- camera (zoom + schuiven) ----------
@@ -554,17 +566,17 @@ function addLinks(el) {
   }
 }
 
-async function render(keepCam = false) {
+async function render(keepCam = false, keepSpot = false) {
   if (!st.doc || !st.open || !$("#v-stage")) return;
   if (st.selected) selectStamp(null); // selectie hoort bij de vorige pagina
   try {
-    await renderInner(keepCam);
+    await renderInner(keepCam, keepSpot);
   } catch (e) {
     if (st.open) console.error(e);
   }
 }
 
-async function renderInner(keepCam) {
+async function renderInner(keepCam, keepSpot) {
   const token = ++st.token;
   scrollObs.forEach((o) => o.disconnect());
   scrollObs = [];
@@ -576,7 +588,7 @@ async function renderInner(keepCam) {
   if (mode === "scroll") {
     root().dataset.mode = mode;
     updateScrollUi(mode);
-    return renderScroll(token, W, H);
+    return renderScroll(token, W, H, keepSpot ? scrollSpot() : null);
   }
   updateScrollUi(mode);
 
@@ -628,7 +640,18 @@ function prerender(W, H, mode) {
 
 let scrollSlots = [];
 let scrollObs = [];
-async function renderScroll(token, W, H) {
+
+// Huidige plek in scrollstand: pagina bovenaan het scherm + hoe ver daarin (0..1).
+function scrollSpot() {
+  if (root().dataset.mode !== "scroll" || !scrollSlots.length || !scrollSlots[0].isConnected) return null;
+  const top = -cam.y / cam.z;
+  let slot = scrollSlots[0];
+  for (const s of scrollSlots) if (s.offsetTop <= top) slot = s;
+  const f = (top - slot.offsetTop) / Math.max(1, slot.offsetHeight);
+  return { page: +slot.dataset.page, f: Math.max(0, Math.min(1, f)) };
+}
+
+async function renderScroll(token, W, H, spot = null) {
   const wrap = $("#v-pages");
   // Schermbreed: pagina vult de hele breedte. Anders een prettige leeskolom.
   const colW = S().scrollFill ? W : Math.floor(Math.min(W, Math.max(H * 0.9, W * 0.7)));
@@ -647,8 +670,8 @@ async function renderScroll(token, W, H) {
   wrap.style.width = W + "px";
   wrap.style.height = "";
   fill(wrap, ...slots);
-  const target = slots[st.page - 1];
-  cam.y = target ? -target.offsetTop * cam.z : 0;
+  const target = slots[(spot ? spot.page : st.page) - 1];
+  cam.y = target ? -(target.offsetTop + (spot ? spot.f * target.offsetHeight : 0)) * cam.z : 0;
   clampCam();
   applyCam();
 
@@ -1038,15 +1061,16 @@ function attachGestures(stage) {
     };
   }
 
-  function startPan(p, e) {
+  function startPan(p, e, armGrab = true) {
     const pend = { type: "pending", x0: p.x, y0: p.y, t0: performance.now(), cam0: { ...cam }, vx: 0, vy: 0, lx: p.x, ly: p.y, lt: performance.now(), e };
     g = pend;
     // Lang indrukken op een krabbel (buiten tekenen): meteen selecteren en verslepen.
-    if (!st.tool && S().showNotes) {
+    // Alleen als de vinger stil bleef: wie (langzaam) schuift, pakt niets op.
+    if (armGrab && !st.tool && S().showNotes) {
       const cx = e.clientX;
       const cy = e.clientY;
       setTimeout(() => {
-        if (g !== pend || pts.size !== 1) return;
+        if (g !== pend || pend.type !== "pending" || pts.size !== 1) return;
         const d = grabAt({ clientX: cx, clientY: cy });
         if (!d) return;
         lastTap && clearTimeout(lastTap.timer);
@@ -1057,8 +1081,11 @@ function attachGestures(stage) {
   }
 
   stage.addEventListener("pointerdown", (e) => {
+    // Vinger neergezet om een uitlopende scroll te stoppen: dat is geen "lang indrukken".
+    const wasMoving = !!inertia || !!camAnim;
     stopCamAnim();
     cancelAnimationFrame(inertia);
+    inertia = 0;
     stage.setPointerCapture(e.pointerId);
     const p = local(e);
     pts.set(e.pointerId, p);
@@ -1082,7 +1109,7 @@ function attachGestures(stage) {
         return;
       }
     }
-    startPan(p, e);
+    startPan(p, e, !wasMoving);
   });
 
   stage.addEventListener("pointermove", (e) => {
@@ -1137,7 +1164,7 @@ function attachGestures(stage) {
       if (pts.size === 1) {
         // Eén vinger blijft staan: verder schuiven met die vinger.
         const [q] = [...pts.values()];
-        startPan(q, e);
+        startPan(q, e, false);
         g.type = "pan";
         return;
       }
@@ -1181,7 +1208,7 @@ function attachGestures(stage) {
       applyCam();
       vx *= Math.pow(0.94, dt / 16);
       vy *= Math.pow(0.94, dt / 16);
-      if (Math.abs(vx) + Math.abs(vy) > 0.02) inertia = requestAnimationFrame(frame);
+      inertia = Math.abs(vx) + Math.abs(vy) > 0.02 ? requestAnimationFrame(frame) : 0;
     };
     if (Math.abs(vx) + Math.abs(vy) > 0.1) inertia = requestAnimationFrame(frame);
   }
