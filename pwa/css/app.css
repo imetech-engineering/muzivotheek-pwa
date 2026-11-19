@@ -109,9 +109,15 @@ button {
 /* Sneltoets: één nummer, rechts in de kop. */
 .quick-btn {
   margin-left: auto;
-  width: 48px;
+  min-width: 48px;
+  max-width: 45vw;
   height: 48px;
-  flex: none;
+  padding: 0 14px 0 11px;
+  gap: 6px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  flex: 0 1 auto;
   border: 0;
   border-radius: 14px;
   background: var(--pink);
@@ -121,7 +127,20 @@ button {
   justify-content: center;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
 }
+/* Smal scherm met sneltoets: appnaam weg, zodat de titel past. */
+@media (max-width: 520px) {
+  .app-header:has(.quick-btn:not([hidden])) .brand-name {
+    display: none;
+  }
+}
+.quick-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .quick-btn .ic {
+  flex: none;
   width: 26px;
   height: 26px;
 }
@@ -1474,6 +1493,14 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
 .vbtn:disabled {
   opacity: 0.3;
 }
+/* Sneltoets in de lezer: titel van het nummer, ook op een smal scherm. */
+.vbtn.v-quickbtn span {
+  display: block;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .vbtn.back .ic {
   width: 28px;
   height: 28px;
@@ -1482,6 +1509,14 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
 @media (max-width: 640px) {
   .vbtn span {
     display: none;
+  }
+  .vbtn.v-quickbtn span {
+    max-width: 52px;
+    font-size: 10px;
+  }
+  .vbtn.v-quickbtn {
+    min-width: 0;
+    padding: 0 2px;
   }
   .vbtn {
     min-width: 42px;

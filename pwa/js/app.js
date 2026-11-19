@@ -1580,7 +1580,7 @@ function init() {
     if (e.detail.key === "quickSong" || !e.detail.key) refreshQuick();
   });
   // Sneltoets: één nummer, altijd bovenin, één tik = openen.
-  const quick = h("button", { type: "button", class: "quick-btn", id: "quick-btn", hidden: true, onclick: () => S().quickSong && openSong(S().quickSong), html: icon("bolt") });
+  const quick = h("button", { type: "button", class: "quick-btn", id: "quick-btn", hidden: true, onclick: () => S().quickSong && openSong(S().quickSong), html: icon("bolt") + '<span class="quick-name"></span>' });
   $(".app-header").append(quick);
   refreshQuick();
   $$(".bottom-nav button").forEach((b) => b.addEventListener("click", () => {

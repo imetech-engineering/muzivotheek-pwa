@@ -12,6 +12,8 @@ export async function refreshQuick() {
   const id = settings().quickSong;
   const song = id ? await getSong(id) : null;
   b.hidden = !song;
+  const name = b.querySelector(".quick-name");
+  if (name) name.textContent = song ? song.title : "";
   const label = song ? "Sneltoets: " + song.title : "Sneltoets";
   b.title = label;
   b.setAttribute("aria-label", label);

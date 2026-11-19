@@ -824,8 +824,20 @@ function updateChrome() {
     $("#v-nextsong").disabled = st.listIndex >= st.list.songIds.length - 1;
   }
   root().classList.toggle("has-audio", !!st.song.audioId);
+  updateQuickBtn();
+}
+
+// Knop in de bovenbalk: titel van het sneltoets-nummer i.p.v. "Sneltoets".
+async function updateQuickBtn() {
   const qb = $(".v-quickbtn");
-  if (qb) qb.hidden = !S().quickSong || S().quickSong === st.song.id;
+  if (!qb || !st.song) return;
+  const id = S().quickSong;
+  const song = id && id !== st.song.id ? await getSong(id) : null;
+  qb.hidden = !song;
+  if (!song) return;
+  qb.querySelector("span").textContent = song.title;
+  qb.title = "Sneltoets: " + song.title;
+  qb.setAttribute("aria-label", "Sneltoets: " + song.title);
 }
 
 // ---------- sneltoets ----------
