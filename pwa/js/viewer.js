@@ -218,16 +218,29 @@ function buildDom() {
   attachGestures(stage);
   let lastW = 0;
   let lastH = 0;
-  new ResizeObserver(() => {
-    const w = stage.clientWidth;
-    const hh = stage.clientHeight;
-    if (!st.open || (w === lastW && hh === lastH)) return;
-    // Schermtoetsenbord open/dicht (alleen de hoogte verandert terwijl er getypt wordt):
-    // niets opnieuw opbouwen, anders verspringt de pagina en vervalt de selectie.
-    if (w === lastW && typing()) return;
-    lastW = w;
-    lastH = hh;
+  let settleTimer = 0;
+  const changed = () => stage.clientWidth !== lastW || stage.clientHeight !== lastH;
+  const apply = () => {
+    lastW = stage.clientWidth;
+    lastH = stage.clientHeight;
     debounceRender();
+  };
+  // Pas als het toetsenbord echt weg is kijken of het formaat blijvend anders is.
+  // Meestal is het weer precies als vóór het typen: dan niets opnieuw opbouwen.
+  const settle = () => {
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      if (!st.open) return;
+      if (keyboardLikely()) return settle();
+      if (changed()) apply();
+    }, 700);
+  };
+  new ResizeObserver(() => {
+    if (!st.open || !changed()) return;
+    // Schermtoetsenbord open/dicht (alleen de hoogte verandert, tijdens of net na
+    // het typen): niet opnieuw opbouwen, anders flikkert en verspringt de pagina.
+    if (stage.clientWidth === lastW && keyboardLikely()) return settle();
+    apply();
   }).observe(stage);
 }
 
@@ -236,6 +249,15 @@ function typing() {
   const a = document.activeElement;
   return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
 }
+
+// Het toetsenbord schuift pas na het sluiten van de pop-up weg: tot ~1,5 s na
+// het verlaten van een tekstveld rekenen we een hoogteverandering nog daartoe.
+let typedAt = 0;
+document.addEventListener("focusout", (e) => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) typedAt = performance.now();
+});
+const keyboardLikely = () => typing() || performance.now() - typedAt < 1500;
 
 let renderTimer = 0;
 function debounceRender() {
@@ -770,6 +792,9 @@ function trackScrollPage() {
   const mid = (-cam.y + H * 0.35) / cam.z;
   let cur = 1;
   for (const s of scrollSlots) if (s.offsetTop <= mid) cur = +s.dataset.page;
+  // Helemaal onderaan: de laatste pagina telt, ook als die korter is dan het scherm.
+  const total = contentSize().h * cam.z;
+  if (scrollSlots.length && total > H && -cam.y + H >= total - 2) cur = st.pages;
   if (cur !== st.page) {
     st.page = cur;
     updateChrome();
