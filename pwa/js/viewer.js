@@ -1003,7 +1003,14 @@ function panPage(dir) {
 export function next() {
   if (!st.open) return;
   const mode = root().dataset.mode;
-  if (mode === "scroll") return scrollBy(1);
+  if (mode === "scroll") {
+    // Al helemaal onderaan: net als bij omslaan door naar het volgende nummer.
+    if (scrollAtEdge(1)) {
+      if (st.list && st.listIndex < st.list.songIds.length - 1) return gotoSong(1);
+      return bump(1);
+    }
+    return scrollBy(1);
+  }
   if (cam.z > 1.01 && panPage(1)) return;
   if (S().halfTurn && mode === "single" && !st.half && st.page < st.pages && !halfSkipped(st.page)) {
     st.half = true;
@@ -1029,7 +1036,14 @@ export function next() {
 export function prev() {
   if (!st.open) return;
   const mode = root().dataset.mode;
-  if (mode === "scroll") return scrollBy(-1);
+  if (mode === "scroll") {
+    // Al helemaal bovenaan: naar het einde van het vorige nummer.
+    if (scrollAtEdge(-1)) {
+      if (st.list && st.listIndex > 0) return gotoSong(-1, true);
+      return bump(-1);
+    }
+    return scrollBy(-1);
+  }
   if (cam.z > 1.01 && panPage(-1)) return;
   if (st.half) {
     st.half = false;
@@ -1070,6 +1084,14 @@ async function gotoSong(dir, toEnd = false) {
   const s = await getSong(id);
   await openSong(id, { keepList: true, page: toEnd && s ? s.pages : 1 });
   toast(`${i + 1}. ${s ? s.title : ""}`, 1500);
+}
+
+// Scrollstand: staat (of schuift al naar) de onder- of bovenrand in beeld?
+function scrollAtEdge(dir) {
+  const { H } = stageSize();
+  const y = camAnim && camTarget ? camTarget.y : cam.y;
+  if (dir < 0) return y >= -2;
+  return y <= H - contentSize().h * cam.z + 2;
 }
 
 function scrollBy(dir) {

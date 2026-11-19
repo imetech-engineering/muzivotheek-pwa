@@ -30,6 +30,7 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
   of een afspeellijst brengt *Terug: …* je naar dezelfde pagina terug. Zie `js/quick.js` en `openQuick` in `js/viewer.js`.
 - **Bladwijzers en sprongen**: sprong-knopjes op de pagina voor herhalingen/D.S./coda, met *Terug*.
 - **Afspeellijsten**: maken, volgorde slepen, kopiëren; spelen loopt door naar het volgende nummer.
+  Ook in de scrollstand: pedaal/tikken helemaal onderaan = volgend nummer, helemaal bovenaan = vorig nummer.
 - **Metronoom** (ook in de lezer, tempo per nummer bewaard) en **stemapparaat** (C/B♭/E♭/F).
 - **Meespelen**: opname (mp3) of YouTube-link per nummer, met A-B herhalen, ±10 s en tempo.
   YouTube via de officiële speler (youtube-nocookie), alleen met internet.
