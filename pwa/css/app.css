@@ -1239,6 +1239,7 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 .v-sheet,
+.v-mark,
 .v-ink {
   position: absolute;
   inset: 0;
@@ -1246,8 +1247,16 @@ body.viewing > :not(.viewer):not(#toast):not(.dlg-back):not(.progress) {
   height: 100%;
   display: block;
 }
+.v-mark,
 .v-ink {
   pointer-events: none;
+}
+/* Markeerstift mengt met de noten: overdag blijft zwart zwart, 's nachts wit wit. */
+.v-mark {
+  mix-blend-mode: multiply;
+}
+.viewer.night .v-mark {
+  mix-blend-mode: screen;
 }
 .viewer.night .v-sheet {
   filter: invert(1) hue-rotate(180deg);

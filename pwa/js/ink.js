@@ -18,15 +18,18 @@ export async function saveInk(songId, page, items) {
   else await db.del("notes", key(songId, page));
 }
 
-// Teken alle items op ctx. box = zichtbaar deel van de pagina (bij bijsnijden),
+// Teken items op ctx. box = zichtbaar deel van de pagina (bij bijsnijden),
 // w/h = pixelgrootte van het canvas.
-export function drawInk(ctx, items, box, w, h, selected = null) {
+// layer: "marker" = alleen markeerstift (eigen laag die met de noten mengt, zodat
+// zwart zwart blijft), "top" = al het andere plus het selectiekader, null = alles.
+export function drawInk(ctx, items, box, w, h, selected = null, layer = null) {
   ctx.clearRect(0, 0, w, h);
   const sx = w / box.w;
   const sy = h / box.h;
   const X = (x) => (x - box.x) * sx;
   const Y = (y) => (y - box.y) * sy;
   for (const it of items) {
+    if (layer === "marker" && it.t !== "marker") continue;
     if (it.t === "text") {
       ctx.fillStyle = it.c;
       ctx.font = fontFor(it, Math.max(6, it.s * sx));
@@ -64,29 +67,8 @@ export function drawInk(ctx, items, box, w, h, selected = null) {
     }
     const p = it.p;
     if (!p || p.length < 2) continue;
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = it.c;
-    ctx.lineWidth = Math.max(1, it.w * sx);
-    if (it.t === "marker") {
-      // Geel mag feller (minder doorzichtig), de rest blijft licht zodat noten leesbaar blijven.
-      ctx.globalAlpha = /^#ff[ef]/i.test(it.c) ? 0.5 : 0.35;
-      ctx.lineCap = "butt";
-    }
-    ctx.beginPath();
-    ctx.moveTo(X(p[0]), Y(p[1]));
-    if (p.length === 2) ctx.lineTo(X(p[0]) + 0.1, Y(p[1]));
-    for (let i = 2; i < p.length - 2; i += 2) {
-      // Vloeiende lijn: kwadratische curve door middens.
-      const mx = (p[i] + p[i + 2]) / 2;
-      const my = (p[i + 1] + p[i + 3]) / 2;
-      ctx.quadraticCurveTo(X(p[i]), Y(p[i + 1]), X(mx), Y(my));
-    }
-    if (p.length >= 4) ctx.lineTo(X(p[p.length - 2]), Y(p[p.length - 1]));
-    ctx.stroke();
-    ctx.restore();
-    if (it === selected) {
+    if (layer !== "top" || it.t !== "marker") strokeLine(ctx, it, X, Y, sx);
+    if (it === selected && layer !== "marker") {
       // Geselecteerde lijn: stippelkader om de hele lijn.
       const b = strokeBounds(it);
       const pad = Math.max(6, (it.w * sx) / 2 + 4);
@@ -98,6 +80,33 @@ export function drawInk(ctx, items, box, w, h, selected = null) {
       ctx.restore();
     }
   }
+}
+
+// Eén lijn (pen of markeerstift) tekenen.
+function strokeLine(ctx, it, X, Y, sx) {
+  const p = it.p;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = it.c;
+  ctx.lineWidth = Math.max(1, it.w * sx);
+  if (it.t === "marker") {
+    // Geel mag feller (minder doorzichtig), de rest blijft licht zodat noten leesbaar blijven.
+    ctx.globalAlpha = /^#ff[ef]/i.test(it.c) ? 0.5 : 0.35;
+    ctx.lineCap = "butt";
+  }
+  ctx.beginPath();
+  ctx.moveTo(X(p[0]), Y(p[1]));
+  if (p.length === 2) ctx.lineTo(X(p[0]) + 0.1, Y(p[1]));
+  for (let i = 2; i < p.length - 2; i += 2) {
+    // Vloeiende lijn: kwadratische curve door middens.
+    const mx = (p[i] + p[i + 2]) / 2;
+    const my = (p[i + 1] + p[i + 3]) / 2;
+    ctx.quadraticCurveTo(X(p[i]), Y(p[i + 1]), X(mx), Y(my));
+  }
+  if (p.length >= 4) ctx.lineTo(X(p[p.length - 2]), Y(p[p.length - 1]));
+  ctx.stroke();
+  ctx.restore();
 }
 
 // Rand (min/max) van een lijn in paginacoördinaten.
