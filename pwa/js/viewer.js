@@ -387,6 +387,7 @@ async function sharpen() {
     c.getContext("2d").drawImage(sheet, 0, 0);
     el._res = want;
     el._ink.width = el._ink.height = 0; // drawPageInk maakt hem weer op maat
+    el._mark.width = el._mark.height = 0;
     drawPageInk(el);
   }
 }
@@ -527,13 +528,16 @@ async function pageEl(p, slotW, slotH, fitWidthOnly = false) {
   shown.getContext("2d").drawImage(sheet, 0, 0);
   shown.className = "v-sheet";
 
-  // Krabbellaag krijgt pas pixels als er iets op staat (scheelt de helft geheugen).
+  // Krabbellagen krijgen pas pixels als er iets op staat (scheelt geheugen).
+  // Markeerstift apart onder de pen: die laag mengt met de noten (CSS
+  // mix-blend-mode), zodat zwarte noten onder de arcering zwart blijven.
+  const mark = h("canvas", { class: "v-mark", width: 0, height: 0 });
   const ink = h("canvas", { class: "v-ink", width: 0, height: 0 });
 
-  const el = h("div", { class: "v-page", dataset: { page: p } }, shown, ink);
+  const el = h("div", { class: "v-page", dataset: { page: p } }, shown, mark, ink);
   el.style.width = w + "px";
   el.style.height = hgt + "px";
-  Object.assign(el, { _p: p, _w: w, _h: hgt, _box: box, _aspect: aspect, _ink: ink, _sheet: shown, _res: res, _args: [p, slotW, slotH, fitWidthOnly] });
+  Object.assign(el, { _p: p, _w: w, _h: hgt, _box: box, _aspect: aspect, _ink: ink, _mark: mark, _sheet: shown, _res: res, _args: [p, slotW, slotH, fitWidthOnly] });
   await getInk(p);
   drawPageInk(el);
   addLinks(el);
@@ -542,16 +546,23 @@ async function pageEl(p, slotW, slotH, fitWidthOnly = false) {
 
 function drawPageInk(el) {
   const items = S().showNotes ? st.ink.get(el._p) || [] : [];
-  const ink = el._ink;
-  if (!items.length) {
-    if (ink.width) ink.width = ink.height = 0;
+  const sel = st.selected && st.selected.page === el._p ? st.selected.item : null;
+  const hasMark = items.some((it) => it.t === "marker");
+  const hasTop = items.some((it) => it.t !== "marker") || (sel && items.includes(sel));
+  drawLayer(el, el._mark, hasMark ? items : null, null, "marker");
+  drawLayer(el, el._ink, hasTop ? items : null, sel, "top");
+}
+
+function drawLayer(el, cv, items, sel, layer) {
+  if (!items) {
+    if (cv.width) cv.width = cv.height = 0;
     return;
   }
-  if (ink.width !== el._sheet.width || ink.height !== el._sheet.height) {
-    ink.width = el._sheet.width;
-    ink.height = el._sheet.height;
+  if (cv.width !== el._sheet.width || cv.height !== el._sheet.height) {
+    cv.width = el._sheet.width;
+    cv.height = el._sheet.height;
   }
-  drawInk(el._ink.getContext("2d"), items, el._box, el._ink.width, el._ink.height, st.selected && st.selected.page === el._p ? st.selected.item : null);
+  drawInk(cv.getContext("2d"), items, el._box, cv.width, cv.height, sel, layer);
 }
 
 // Alleen de krabbel-laag opnieuw tekenen (geen nieuwe opmaak, dus niets verspringt).
@@ -727,6 +738,7 @@ async function renderScroll(token, W, H, spot = null) {
         if (el && el._sheet) {
           el._sheet.width = el._sheet.height = 0;
           el._ink.width = el._ink.height = 0;
+          el._mark.width = el._mark.height = 0;
         }
         slot.textContent = "";
         slot._done = false;
@@ -1865,6 +1877,12 @@ function showLoupe(d, fingerX, fingerY) {
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, W, W);
   ctx.drawImage(sheet, sx, sy, sw, sh, 0, 0, W, W);
+  if (el._mark.width) {
+    // Zelfde menging als op de pagina (de loep wordt 's nachts als geheel omgekeerd).
+    ctx.globalCompositeOperation = "multiply";
+    ctx.drawImage(el._mark, sx, sy, sw, sh, 0, 0, W, W);
+    ctx.globalCompositeOperation = "source-over";
+  }
   if (el._ink.width) ctx.drawImage(el._ink, sx, sy, sw, sh, 0, 0, W, W);
   // Kruisje in het midden.
   ctx.strokeStyle = "#c41f6e";
