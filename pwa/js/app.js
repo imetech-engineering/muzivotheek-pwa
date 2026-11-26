@@ -1406,7 +1406,7 @@ async function renderSettings() {
     group(
       "Opslag & back-up",
       h("div", { class: "set-row" }, h("div", {}, h("div", { class: "set-l" }, `${songs.length} ${songs.length === 1 ? "nummer" : "nummers"}, ${lists.length} ${lists.length === 1 ? "lijst" : "lijsten"}`), h("div", { class: "set-s" }, est ? `${fmtBytes(est.usage)} gebruikt` + (persisted ? " · vastgezet ✓" : "") : ""))),
-      h("p", { class: "set-s pad-x" }, "Alles staat alleen op dit apparaat. " + backupAgo() + (S().lastBackup && hasUnsavedChanges() ? ", daarna is er iets gewijzigd" : "") + ". Na 2 weken zonder back-up krijg je een melding, als er iets gewijzigd is."),
+      h("p", { class: "set-s pad-x" }, "Alles staat alleen op dit apparaat. " + backupAgo() + (S().lastBackup && hasUnsavedChanges() ? ", daarna is er iets gewijzigd" : "") + ". Na een week zonder back-up krijg je een melding, als er iets gewijzigd is."),
       h(
         "div",
         { class: "btn-row" },
@@ -1447,8 +1447,8 @@ async function manualUpdateCheck(e) {
   }
 }
 
-const BACKUP_EVERY_DAYS = 14;
-const SNOOZE_DAYS = 3;
+const BACKUP_EVERY_DAYS = 7; // herinneren als de laatste back-up ouder is (en er iets gewijzigd is)
+const SNOOZE_DAYS = 1; // "Later" en wachttijd voor een nieuwe gebruiker
 const DAY = 86400000;
 
 function markBackup(t = Date.now()) {
@@ -1482,7 +1482,7 @@ function backupAgo() {
 }
 
 // Herinnering (banner in de bibliotheek): alleen als er sinds de laatste back-up iets
-// gewijzigd is én die back-up ouder is dan 2 weken. "Later" = 3 dagen niet meer vragen.
+// gewijzigd is én die back-up ouder is dan een week. "Later" = een dag niet meer vragen.
 // Gecontroleerd bij het starten en bij terugkeren naar de app.
 function maybeRemindBackup(count) {
   const now = Date.now();
@@ -1491,7 +1491,7 @@ function maybeRemindBackup(count) {
   let due = !!count && hasUnsavedChanges();
   if (due && since && now - since < BACKUP_EVERY_DAYS * DAY) due = false;
   if (due && s.backupNagAt && now < s.backupNagAt) due = false;
-  // Nieuwe gebruiker zonder back-up: pas na een paar dagen vragen.
+  // Nieuwe gebruiker zonder back-up: pas na een dag vragen.
   if (due && !since && !s.backupNagAt) {
     setSetting("backupNagAt", now + SNOOZE_DAYS * DAY);
     due = false;
