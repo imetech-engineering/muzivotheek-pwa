@@ -301,7 +301,8 @@ export async function relinkSource(src, link) {
   return src;
 }
 
-export const saveSource = (src) => db.put("sources", src.id, src);
+// opts.quiet: alleen bijwerk-gegevens (lastSync, broken), telt niet als wijziging voor de back-up.
+export const saveSource = (src, opts) => db.put("sources", src.id, src, opts);
 export const removeSource = (id) => db.del("sources", id);
 
 const srcKey = (src, it) => `sp:${src.driveId}:${it.id}`;
@@ -333,7 +334,7 @@ export async function importItems(src, items, onProgress) {
     }
   }
   src.lastSync = Date.now();
-  await saveSource(src);
+  await saveSource(src, { quiet: true });
   return { added, updated };
 }
 
@@ -348,7 +349,7 @@ export async function syncSource(src, { interactive = false, onProgress } = {}) 
     if (e.status === 403 || e.status === 404) {
       // Link verlopen of ingetrokken: onthouden, zodat de app om de nieuwe link kan vragen.
       src.broken = true;
-      await saveSource(src);
+      await saveSource(src, { quiet: true });
       e.message = `De link van "${src.name}" werkt niet meer. Plak de nieuwe link.`;
     }
     throw e;
@@ -362,7 +363,7 @@ export async function syncSource(src, { interactive = false, onProgress } = {}) 
   }
   const r = await importItems(src, todo, onProgress);
   src.lastSync = Date.now();
-  await saveSource(src);
+  await saveSource(src, { quiet: true });
   return r;
 }
 

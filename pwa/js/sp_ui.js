@@ -182,7 +182,7 @@ async function browse(src) {
       const dead = e.status === 403 || e.status === 404;
       if (dead) {
         src.broken = true;
-        saveSource(src);
+        saveSource(src, { quiet: true });
       }
       fill(
         list,

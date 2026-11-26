@@ -54,7 +54,7 @@ export async function syncFolder(src, onProgress) {
     if (!r.duplicate) added++;
   }
   src.lastSync = Date.now();
-  await db.put("sources", src.id, src);
+  await db.put("sources", src.id, src, { quiet: true });
   return { added, updated };
 }
 

@@ -34,7 +34,11 @@ PDF's, krabbels en afspeellijsten blijven op het apparaat.
 - **Metronoom** (ook in de lezer, tempo per nummer bewaard) en **stemapparaat** (C/B♭/E♭/F).
 - **Meespelen**: opname (mp3) of YouTube-link per nummer, met A-B herhalen, ±10 s en tempo.
   YouTube via de officiële speler (youtube-nocookie), alleen met internet.
-- **Back-up** als .zip (delen naar Drive/OneDrive) en terugzetten.
+- **Back-up** als .zip (delen naar Drive/OneDrive) en terugzetten. Bevat nummers, PDF's, krabbels,
+  afspeellijsten, audio, instellingen en gekoppelde SharePoint-mappen (link en *volgen*; na terugzetten
+  zo nodig opnieuw inloggen). Gekoppelde mappen op de computer kunnen niet mee (de browser geeft die
+  toegang niet als bestand mee): opnieuw koppelen. *Cookies en sitegegevens wissen* in de browser
+  wist alles; alleen *cache* wissen is veilig.
 - **SharePoint**: link van een gedeelde map plakken, inloggen met Microsoft, door submappen
   bladeren, zoeken, nummers aanvinken. Een map *volgen* = nieuwe/gewijzigde nummers komen er
   bij het openen vanzelf bij. Krabbels en gegevens blijven bij een nieuwe versie behouden.
