@@ -3085,3 +3085,16 @@ body.cam-open {
   object-fit: cover;
   display: block;
 }
+
+/* ---------- back-upherinnering (banner in de bibliotheek) ---------- */
+.backup-bar {
+  flex-wrap: wrap;
+  padding: 10px 14px;
+}
+.backup-bar-ic { flex: none; display: inline-flex; }
+.backup-bar-t {
+  flex: 1 1 200px;
+  font-weight: 600;
+  color: var(--text);
+}
+.backup-bar .row-btns { margin-left: auto; }

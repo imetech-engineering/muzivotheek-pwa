@@ -54,18 +54,53 @@ async function tx(store, mode, fn) {
   });
 }
 
+// Tijdstip van de laatste wijziging aan iets dat in de back-up hoort, voor de
+// back-upherinnering. Opslaan met { quiet: true } telt niet mee (bijv. "laatst
+// geopend", paginamaten, tijdstip van bijwerken). Voorbeeldplaatjes ook niet.
+const TRACKED = new Set(["songs", "files", "notes", "audio", "setlists", "sources"]);
+const CHANGE_KEY = "muzivotheek.lastChange";
+
+function changed(store, opts) {
+  if (!TRACKED.has(store) || (opts && opts.quiet)) return;
+  try {
+    localStorage.setItem(CHANGE_KEY, String(Date.now()));
+  } catch (e) {}
+}
+
+// null = onbekend (nog nooit bijgehouden): behandelen als "gewijzigd".
+export function lastChange() {
+  try {
+    const v = Number(localStorage.getItem(CHANGE_KEY));
+    return v > 0 ? v : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function setLastChange(t) {
+  try {
+    localStorage.setItem(CHANGE_KEY, String(t));
+  } catch (e) {}
+}
+
+const write = (store, fn, opts) =>
+  tx(store, "readwrite", fn).then((r) => {
+    changed(store, opts);
+    return r;
+  });
+
 export const db = {
   get: (store, key) => tx(store, "readonly", (s) => wrap(s.get(key))),
-  put: (store, key, value) => tx(store, "readwrite", (s) => wrap(s.put(value, key))),
-  del: (store, key) => tx(store, "readwrite", (s) => wrap(s.delete(key))),
+  put: (store, key, value, opts) => write(store, (s) => wrap(s.put(value, key)), opts),
+  del: (store, key) => write(store, (s) => wrap(s.delete(key))),
   all: (store) => tx(store, "readonly", (s) => wrap(s.getAll())),
   keys: (store) => tx(store, "readonly", (s) => wrap(s.getAllKeys())),
-  clear: (store) => tx(store, "readwrite", (s) => wrap(s.clear())),
+  clear: (store) => write(store, (s) => wrap(s.clear())),
   // Alle sleutels die met een prefix beginnen (krabbels van één nummer).
   keysWithPrefix: (store, prefix) =>
     tx(store, "readonly", (s) => wrap(s.getAllKeys(IDBKeyRange.bound(prefix, prefix + "￿")))),
   delPrefix: (store, prefix) =>
-    tx(store, "readwrite", (s) => wrap(s.delete(IDBKeyRange.bound(prefix, prefix + "￿")))),
+    write(store, (s) => wrap(s.delete(IDBKeyRange.bound(prefix, prefix + "￿")))),
 };
 
 export function uid() {

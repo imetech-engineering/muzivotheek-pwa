@@ -1,6 +1,6 @@
 // Muzivotheek: hoofdscherm met tabbladen Nummers, Lijsten, Tools, Instellingen.
 
-import { db, persistStorage, storageEstimate } from "./db.js";
+import { db, persistStorage, storageEstimate, lastChange, setLastChange } from "./db.js";
 import { allSongs, getSong, saveSong, importPdf, deleteSong, sortSongs, matches, mergeSongs, appendFiles } from "./library.js";
 import { allSetlists, getSetlist, saveSetlist, newSetlist, deleteSetlist, duplicateSetlist, addToSetlist } from "./setlists.js";
 import { settings, setSetting, resetSettings, applyTheme } from "./settings.js";
@@ -33,6 +33,7 @@ const state = {
   openList: null, // id van geopende afspeellijst
   needPermission: [], // gekoppelde mappen die opnieuw toestemming nodig hebben
   spBroken: [], // SharePoint-mappen waarvan de link niet meer werkt
+  backupDue: false, // banner: wijzigingen sinds de laatste back-up, en die is te oud
 };
 
 // ---------- tabs ----------
@@ -178,6 +179,20 @@ async function renderSongs() {
         html: icon("link") + `<span>SharePoint-link van "${state.spBroken[0].name}" werkt niet meer. Tik om de nieuwe link te plakken.</span>`,
       })
     : null;
+  const backupBar = state.backupDue && !state.sel
+    ? h(
+        "div",
+        { class: "sync-bar backup-bar", role: "status" },
+        h("span", { class: "backup-bar-ic", html: icon("download") }),
+        h("span", { class: "backup-bar-t" }, (S().lastBackup ? "Nieuwe wijzigingen sinds je laatste back-up" : "Je hebt nog geen back-up") + ". Zonder back-up ben je alles kwijt als de browsergegevens gewist worden."),
+        h(
+          "span",
+          { class: "row-btns" },
+          h("button", { type: "button", class: "btn small", onclick: snoozeBackup }, "Later"),
+          h("button", { type: "button", class: "btn small primary", onclick: backup }, "Nu maken")
+        )
+      )
+    : null;
   const selBar = state.sel
     ? h(
         "div",
@@ -196,7 +211,7 @@ async function renderSongs() {
         }, "Alles")
       )
     : null;
-  fill(tab, spBar, folderBar, selBar || h("div", { class: "search-row" }, h("span", { class: "search-ic", html: icon("search") }), search), selBar ? null : tools, listEl);
+  fill(tab, spBar, folderBar, backupBar, selBar || h("div", { class: "search-row" }, h("span", { class: "search-ic", html: icon("search") }), search), selBar ? null : tools, listEl);
   renderSelActions();
   renderSongsList();
 
@@ -1391,7 +1406,7 @@ async function renderSettings() {
     group(
       "Opslag & back-up",
       h("div", { class: "set-row" }, h("div", {}, h("div", { class: "set-l" }, `${songs.length} ${songs.length === 1 ? "nummer" : "nummers"}, ${lists.length} ${lists.length === 1 ? "lijst" : "lijsten"}`), h("div", { class: "set-s" }, est ? `${fmtBytes(est.usage)} gebruikt` + (persisted ? " · vastgezet ✓" : "") : ""))),
-      h("p", { class: "set-s pad-x" }, "Alles staat alleen op dit apparaat. " + backupAgo() + ". Je krijgt elke 2 weken een herinnering."),
+      h("p", { class: "set-s pad-x" }, "Alles staat alleen op dit apparaat. " + backupAgo() + (S().lastBackup && hasUnsavedChanges() ? ", daarna is er iets gewijzigd" : "") + ". Na 2 weken zonder back-up krijg je een melding, als er iets gewijzigd is."),
       h(
         "div",
         { class: "btn-row" },
@@ -1433,9 +1448,30 @@ async function manualUpdateCheck(e) {
 }
 
 const BACKUP_EVERY_DAYS = 14;
+const SNOOZE_DAYS = 3;
+const DAY = 86400000;
 
-function markBackup() {
-  setSetting("lastBackup", Date.now());
+function markBackup(t = Date.now()) {
+  setSetting("lastBackup", t);
+  setBackupDue(false);
+}
+
+// Is er iets gewijzigd sinds de laatste back-up? Onbekend telt als ja.
+function hasUnsavedChanges() {
+  const since = S().lastBackup || 0;
+  const ch = lastChange();
+  return !since || ch === null || ch > since;
+}
+
+function setBackupDue(v) {
+  if (state.backupDue === v) return;
+  state.backupDue = v;
+  if (state.tab === "songs" && !viewerOpen()) renderSongs();
+}
+
+function snoozeBackup() {
+  setSetting("backupNagAt", Date.now() + SNOOZE_DAYS * DAY);
+  setBackupDue(false);
 }
 
 function backupAgo() {
@@ -1445,18 +1481,22 @@ function backupAgo() {
   return "Laatste back-up: " + (d <= 0 ? "vandaag" : d === 1 ? "gisteren" : `${d} dagen geleden`);
 }
 
-// Herinnering: na 2 weken zonder back-up (en niet vaker dan om de 3 dagen).
+// Herinnering (banner in de bibliotheek): alleen als er sinds de laatste back-up iets
+// gewijzigd is én die back-up ouder is dan 2 weken. "Later" = 3 dagen niet meer vragen.
+// Gecontroleerd bij het starten en bij terugkeren naar de app.
 function maybeRemindBackup(count) {
-  if (!count || viewerOpen()) return;
   const now = Date.now();
   const s = S();
   const since = s.lastBackup || 0;
-  if (since && now - since < BACKUP_EVERY_DAYS * 86400000) return;
-  if (s.backupNagAt && now < s.backupNagAt) return;
+  let due = !!count && hasUnsavedChanges();
+  if (due && since && now - since < BACKUP_EVERY_DAYS * DAY) due = false;
+  if (due && s.backupNagAt && now < s.backupNagAt) due = false;
   // Nieuwe gebruiker zonder back-up: pas na een paar dagen vragen.
-  if (!since && !s.backupNagAt) return setSetting("backupNagAt", now + 3 * 86400000);
-  setSetting("backupNagAt", now + 3 * 86400000);
-  toast(since ? "Tijd voor een back-up van je krabbels en lijsten" : "Je hebt nog geen back-up gemaakt", 15000, { label: "Nu maken", run: backup });
+  if (due && !since && !s.backupNagAt) {
+    setSetting("backupNagAt", now + SNOOZE_DAYS * DAY);
+    due = false;
+  }
+  setBackupDue(due);
 }
 
 async function backup() {
@@ -1528,10 +1568,16 @@ async function restore(file) {
   prog.querySelector("span").textContent = "Terugzetten…";
   prog.querySelector("i").style.width = "50%";
   try {
-    const n = await importBackup(file, how);
+    const r = await importBackup(file, how);
+    // Alles vervangen: de app is nu gelijk aan die back-up, dus niets nieuws sinds de back-up.
+    if (how === "replace" && r.created) {
+      setLastChange(r.created);
+      markBackup(r.created);
+    }
     thumbUrls.clear();
     applyTheme();
-    toast(`${n} nummers teruggezet`, 3000);
+    const maps = r.sources ? ` en ${r.sources} SharePoint-${r.sources === 1 ? "map" : "mappen"}` : "";
+    toast(`${r.songs} nummers${maps} teruggezet`, 3000);
     document.dispatchEvent(new CustomEvent("library"));
     renderSettings();
   } catch (e) {
@@ -1619,6 +1665,9 @@ function init() {
   allSongs().then(async (s) => {
     if (s.length) persistStorage();
     maybeRemindBackup(s.length);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") allSongs().then((x) => maybeRemindBackup(x.length));
+    });
     // Eenmalig: eerder foutief herkende (lange/rare) namen weer leegmaken.
     try {
       if (!localStorage.getItem("muzivotheek.cleanRecog1")) {

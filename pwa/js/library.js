@@ -42,7 +42,7 @@ export async function getSong(id) {
 export async function saveSongQuiet(song) {
   await allSongs();
   songs.set(song.id, song);
-  await db.put("songs", song.id, song);
+  await db.put("songs", song.id, song, { quiet: true });
 }
 
 export async function saveSong(song) {
@@ -172,7 +172,7 @@ export async function markOpened(id) {
   s.opened = Date.now();
   s.played = (s.played || 0) + 1;
   songs.set(id, s);
-  await db.put("songs", id, s);
+  await db.put("songs", id, s, { quiet: true });
 }
 
 export function invalidateCache() {

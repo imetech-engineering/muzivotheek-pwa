@@ -125,6 +125,9 @@ export async function exportBackup(onProgress) {
   const notes = await db.all("notes");
   const audioKeys = await db.keys("audio");
   const audio = await db.all("audio");
+  // Gekoppelde SharePoint-mappen (link, volgen). Mappen op het apparaat kunnen niet mee:
+  // de browser geeft de toegang (handle) niet als bestand mee.
+  const sources = (await db.all("sources")).filter((s) => s.type === "sp");
   let settings = {};
   try {
     settings = JSON.parse(localStorage.getItem("muzivotheek.settings") || "{}");
@@ -138,6 +141,7 @@ export async function exportBackup(onProgress) {
     setlists,
     notes: Object.fromEntries(noteKeys.map((k, i) => [k, notes[i]])),
     audio: audioKeys.map((k, i) => ({ id: k, name: audio[i].name, type: audio[i].type })),
+    sources,
     settings,
   };
   entries.push({ name: "muzivotheek.json", data: JSON.stringify(meta) });
@@ -149,7 +153,8 @@ export async function exportBackup(onProgress) {
   return makeZip(entries, onProgress);
 }
 
-// mode: "merge" (bij bestaande voegen) of "replace" (alles vervangen)
+// mode: "merge" (bij bestaande voegen) of "replace" (alles vervangen).
+// Geeft { songs, sources, created } terug: aantallen en de datum van de back-up.
 export async function importBackup(file, mode = "merge") {
   const files = await readZip(file);
   const metaBlob = files.get("muzivotheek.json");
@@ -172,12 +177,34 @@ export async function importBackup(file, mode = "merge") {
     const b = files.get(`audio/${a.id}`);
     if (b) await db.put("audio", a.id, { blob: b.slice(0, b.size, a.type || "audio/mpeg"), name: a.name, type: a.type });
   }
+  const sources = await restoreSources(meta.sources || [], mode);
   if (meta.settings && mode === "replace") {
     try {
       localStorage.setItem("muzivotheek.settings", JSON.stringify(meta.settings));
     } catch (e) {}
   }
   invalidateCache();
+  return { songs: n, sources, created: Date.parse(meta.created) || 0 };
+}
+
+// SharePoint-mappen terugzetten. Bij "replace" vervangen ze de huidige SharePoint-mappen;
+// bij "merge" komt een map er alleen bij als dezelfde link er nog niet is.
+// Mappen op het apparaat blijven altijd staan (die zitten niet in de back-up).
+async function restoreSources(list, mode) {
+  const current = (await db.all("sources")).filter((s) => s.type === "sp");
+  if (mode === "replace") for (const s of current) await db.del("sources", s.id);
+  const keep = mode === "replace" ? [] : current;
+  const links = new Set(keep.map((s) => s.link));
+  const ids = new Set(keep.map((s) => s.id));
+  let n = 0;
+  for (const s of list) {
+    // Bestaande map (zelfde link, of zelfde id met een nieuwere link) niet overschrijven.
+    if (!s || s.type !== "sp" || !s.id || !s.link || links.has(s.link) || ids.has(s.id)) continue;
+    await db.put("sources", s.id, s);
+    links.add(s.link);
+    ids.add(s.id);
+    n++;
+  }
   return n;
 }
 
